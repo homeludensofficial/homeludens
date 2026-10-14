@@ -31,17 +31,17 @@ const SECTIONS = [
     ['address','현장 주소','text',{wide:true,ph:'계약서·마감보고서와 같은 주소'}],
     ['siteCode','현장코드','text',{ph:'마감보고서의 현장코드'}],
     ['finishedAt','준공일 (마감일)','date'],
-    ['builtYear','시공 연도','number',{ph:'준공일을 모르면 연도만 (예: 2024)'}],
-    ['closeReport','마감보고서','check',{text:'마감보고서 업로드 확인됨'}]
+    ['builtYear','시공 연도','number',{ph:'준공일을 모르면 연도만 (예: 2024)'}]
   ]},
-  {no:'3', title:'현장 담당자 · 처리 담당', owner:true, guide:'현장 담당자는 마감보고서의 담당 디자이너입니다. 재직·휴직·퇴사 구분은 업무지원포털 직원 명단에서 자동으로 정해집니다.', fields:[]},
-  {no:'4', title:'문제 내용', fields:[
+  {no:'3', title:'마감보고서 첨부', attach:true, guide:'이 현장의 마감보고서(엑셀)를 첨부해 주세요. 담당자가 이 파일을 보고 진행합니다. PDF·사진도 올릴 수 있습니다.', fields:[]},
+  {no:'4', title:'현장 담당자 · 처리 담당', owner:true, guide:'현장 담당자는 마감보고서의 담당 디자이너입니다. 재직·휴직·퇴사 구분은 업무지원포털 직원 명단에서 자동으로 정해집니다.', fields:[]},
+  {no:'5', title:'문제 내용', fields:[
     ['process','공정','select',{wide:true}],
     ['symptom','문제 내용','textarea',{ph:'예: 세면대와 배수 부위가 분리되어 물이 배수관으로 내려가지 못하고 외부로 샘'}],
     ['note','비고','textarea',{ph:'예: 24년 공사 건으로 AS 비용 발생 가능성 사전 안내 완료'}],
     ['costNotice','비용 안내','check',{text:'부품비·출장비 발생 가능성을 고객에게 미리 안내함'}]
   ]},
-  {no:'5', title:'처리', fields:[
+  {no:'6', title:'처리', fields:[
     ['stage','진행 단계','select',{wide:true}],
     ['contactedAt','첫 고객 연락일','date'],
     ['visitAt','방문 일정','datetime'],
@@ -49,11 +49,11 @@ const SECTIONS = [
     ['cause','원인','select',{wide:true}],
     ['charge','비용 구분','select',{wide:true}]
   ]},
-  {no:'6', title:'비용', costs:true, guide:'합계는 자동 계산됩니다.', fields:[
+  {no:'7', title:'비용', costs:true, guide:'합계는 자동 계산됩니다.', fields:[
     ['costBearer','비용 부담','select',{wide:true}],
     ['customerCharge','고객 청구액 (원)','money']
   ]},
-  {no:'7', title:'완료 · 고객 피드백', fields:[
+  {no:'8', title:'완료 · 고객 피드백', fields:[
     ['doneAt','처리 완료일','date'],
     ['satisfaction','고객 만족도','select'],
     ['result','처리 결과','textarea'],
@@ -67,7 +67,7 @@ const S = {
   f:{group:'전체', stage:'진행 중', q:'', mine:false, alert:'', owner:''},
   me:{isAdmin:false, name:''}, members:[], staff:false,
   session:null, authReady:false, email:null, uid:null, offline:false,
-  photoUrls:{}, confirmDel:false, busy:false, draft:null
+  photoUrls:{}, confirmDel:false, busy:false
 };
 const app = document.getElementById('app');
 
@@ -107,19 +107,19 @@ const stageIdx = t => STAGES.indexOf(t.stage||'접수');
 const isOpen = t => (t.stage||'접수')!=='종결';
 function warranty(t){
   const ref = t.receivedAt || todayStr();
-  if(t.finishedAt) return ref <= addYears(t.finishedAt,1) ? {k:'in', label:'보증 1년 이내', cls:'green'} : {k:'out', label:'보증 기간 경과', cls:'amber'};
+  if(t.finishedAt) return ref <= addYears(t.finishedAt,1) ? {k:'in', label:'보증 1년 이내', cls:'info'} : {k:'out', label:'보증 기간 경과', cls:'info'};
   if(t.builtYear){
     const gap = (+ref.slice(0,4)) - (+t.builtYear);
-    if(gap>=2) return {k:'out', label:'보증 기간 경과', cls:'amber'};
-    if(gap<=0) return {k:'in', label:'보증 1년 이내', cls:'green'};
+    if(gap>=2) return {k:'out', label:'보증 기간 경과', cls:'info'};
+    if(gap<=0) return {k:'in', label:'보증 1년 이내', cls:'info'};
   }
-  return {k:'unk', label:'준공일 확인 필요', cls:'gray'};
+  return {k:'unk', label:'준공일 확인 필요', cls:'info'};
 }
 /** 퇴사 후 1년 안에 생긴 AS 는 예치금에서 비용을 뺀다 (포털 FAQ '예치금'). */
 function deposit(t){
   if(groupOf(t)!=='퇴사') return null;
-  if(!t.resignedAt) return {k:'unk', label:'퇴사일 확인 필요', cls:'gray'};
-  return (t.receivedAt||todayStr()) <= addYears(t.resignedAt,1) ? {k:'yes', label:'예치금 차감 대상', cls:'red'} : {k:'no', label:'예치금 기간 경과', cls:'gray'};
+  if(!t.resignedAt) return {k:'unk', label:'퇴사일 확인 필요', cls:'info'};
+  return (t.receivedAt||todayStr()) <= addYears(t.resignedAt,1) ? {k:'yes', label:'예치금 차감 대상', cls:'hot'} : {k:'no', label:'예치금 기간 경과', cls:'info'};
 }
 function uncontacted(t){
   if((t.stage||'접수')!=='접수' || !t.receivedAt) return 0;
@@ -144,47 +144,14 @@ function flagsHTML(t, opt={}){
   const out = [];
   const w = warranty(t); if(opt.all || w.k!=='in') out.push(`<span class="flag ${w.cls}">${esc(w.label)}</span>`);
   const d = deposit(t); if(d) out.push(`<span class="flag ${d.cls}">${esc(d.label)}</span>`);
-  const u = isOpen(t) ? uncontacted(t) : 0; if(u) out.push(`<span class="flag red">미연락 ${u}일</span>`);
-  if(needsHandler(t)) out.push(`<span class="flag red">처리 담당 지정 필요</span>`);
-  if(opt.all && +t.round>1) out.push(`<span class="flag blue">${esc(t.round)}차 AS</span>`);
+  const u = isOpen(t) ? uncontacted(t) : 0; if(u) out.push(`<span class="flag hot">미연락 ${u}일</span>`);
+  if(needsHandler(t)) out.push(`<span class="flag hot">처리 담당 지정 필요</span>`);
+  if(!(t.files||[]).length) out.push(`<span class="flag">마감보고서 없음</span>`);
+  if(opt.all && +t.round>1) out.push(`<span class="flag">${esc(t.round)}차 AS</span>`);
   return out.join('');
 }
 
-/* ---------- 카톡 문구 ---------- */
-function ownerTag(t){
-  const o = ownerOf(t), g = groupOf(t);
-  if(!o.name) return '';
-  return g==='휴직' ? `※ 휴직자 ${o.name} 현장` : g==='퇴사' ? `※ 퇴사자 ${o.name} 현장` : `${o.name} 현장`;
-}
-function intakeMsg(t){
-  const tag = ownerTag(t);
-  const lines = [
-    '[AS 접수 내용 안내]','',
-    '아래 고객건 AS 접수되었으니 확인 부탁드립니다.','',
-    `- 고객명: ${t.customer||''}${tag?`(${tag})`:''}`,
-    `- 고객번호: ${t.phone||''}`,
-    `- 주소: ${t.address||''}`,
-    `- 문제 내용: ${t.symptom||''}`
-  ];
-  if(t.note) lines.push(`- 비고: ${t.note}`);
-  const h = handlerOf(t); if(h && h!==ownerOf(t).email) lines.push(`- 처리 담당: ${nameOf(h)}`);
-  lines.push('', '📌 확인 후 고객님과 소통 진행해주시고, 피드백 및 진행 사항은 AS 진행관리에 꼭 정리해주시기 바랍니다.', link(t));
-  return lines.join('\n');
-}
-function progressMsg(t){
-  const last = [...(t.log||[])].reverse().find(l=>l.kind!=='stage');
-  const h = handlerOf(t);
-  const lines = [
-    `[AS 진행 공유] ${t.no||''} ${t.customer||''} 고객`,
-    `- 단계: ${t.stage||'접수'}${t.visitAt&&stageIdx(t)<3?` (방문 ${fmtDT(t.visitAt)})`:''}`,
-    `- 처리 담당: ${h?nameOf(h):'미지정'}`
-  ];
-  if(t.cause && t.cause!=='확인 중') lines.push(`- 원인: ${t.cause}`);
-  if(costTotal(t)) lines.push(`- 비용: ${won(costTotal(t))}원${t.costBearer?` (${t.costBearer} 부담)`:''}`);
-  if(last) lines.push(`- 최근 기록: ${last.text.split('\n')[0]}`);
-  lines.push(link(t));
-  return lines.join('\n');
-}
+/* ---------- 링크 복사 ---------- */
 const link = t => location.origin + location.pathname + '#' + t._id;
 async function copy(text, msg){
   try{ await navigator.clipboard.writeText(text); toast(msg); }
@@ -195,46 +162,12 @@ async function copy(text, msg){
     ta.remove();
   }
 }
-/** 카톡 [AS 접수 내용 안내] 문구를 읽어 칸을 채운다. */
-function parseIntake(text){
-  const out = {}, src = String(text||'').replace(/\r/g,'');
-  const grab = label => {
-    const re = new RegExp('^\\s*-\\s*'+label+'\\s*[:：]\\s*([\\s\\S]*?)(?=\\n\\s*-\\s*[^\\n:：]{1,10}[:：]|\\n\\s*\\n|\\n\\s*📌|(?![\\s\\S]))','m');
-    const m = re.exec(src); return m ? m[1].replace(/\s*\n\s*/g,' ').trim() : '';
-  };
-  let cust = grab('고객명');
-  const paren = /[(（]([^)）]*)[)）]/.exec(cust);
-  if(paren){
-    cust = cust.replace(paren[0],'').trim();
-    const m = /(?:※\s*)?(퇴사자|휴직자|재직자)?\s*([가-힣]{2,4})\s*(?:팀장|디자이너|실장|님)?\s*현장/.exec(paren[1]);
-    if(m){
-      const st = m[1] ? m[1].replace('자','') : '';
-      const found = S.members.filter(x=>x.name===m[2]);
-      if(found.length===1) out.ownerEmail = found[0].email;
-      else { out.ownerEmail = NONE; out.ownerName = m[2]; if(st) out.ownerStatus = st; }
-    }
-  }
-  if(cust) out.customer = cust;
-  const phone = grab('고객번호') || grab('연락처') || grab('전화번호'); if(phone) out.phone = phone;
-  const addr = grab('주소'); if(addr) out.address = addr;
-  const sym = grab('문제 내용') || grab('문제내용') || grab('내용'); if(sym) out.symptom = sym;
-  const note = grab('비고'); if(note){
-    out.note = note;
-    const y = /(\d{2,4})\s*년\s*(?:도\s*)?(?:공사|시공)/.exec(note);
-    if(y) out.builtYear = y[1].length===2 ? 2000 + +y[1] : +y[1];
-    if(/사전\s*안내|안내\s*완료/.test(note)) out.costNotice = true;
-  }
-  const proc = OPT.process.find(p=>p!=='기타' && (out.symptom||'').includes(p.split('·')[0]));
-  if(proc) out.process = proc;
-  else if(/세면대|배수|수전|변기|누수|배관/.test(out.symptom||'')) out.process = '설비';
-  out.channel = '카카오톡';
-  return out;
-}
+const fileExt = n => (String(n||'').split('.').pop()||'').slice(0,4);
+const fileSize = b => !b ? '' : b>=1048576 ? (b/1048576).toFixed(1)+'MB' : Math.max(1,Math.round(b/1024))+'KB';
 
 /* ---------- 화면 전환 ---------- */
 function go(view,id){
   S.view=view; S.id=id||null; S.confirmDel=false;
-  if(view!=='edit') S.draft=null;
   const h = view==='doc' && id ? '#'+id : '';
   if(location.hash!==h) history.replaceState(null,'',location.pathname+location.search+h);
   render(); window.scrollTo(0,0);
@@ -300,17 +233,17 @@ function renderList(){
   let body;
   if(!S.loaded) body = `<div class="empty"><h3>AS 목록을 불러오는 중입니다</h3><p>잠시만 기다려 주세요.</p></div>`;
   else if(S.offline && !all.length) body = `<div class="empty"><h3>AS 데이터베이스에 연결하지 못했습니다</h3><p>처음 쓰는 거라면 관리자가 Supabase에 <b>as.sql</b>을 한 번 실행해야 합니다. 이미 했다면 새로고침해 보세요.</p></div>`;
-  else if(!all.length) body = `<div class="empty"><h3>아직 접수된 AS가 없습니다</h3><p>카톡으로 받은 [AS 접수 내용 안내]를 붙여 넣으면 칸이 자동으로 채워집니다.</p><button class="btn primary" data-act="new">첫 AS 접수</button></div>`;
+  else if(!all.length) body = `<div class="empty"><h3>아직 접수된 AS가 없습니다</h3><p>AS가 들어오면 현장 정보를 넣고 마감보고서를 첨부해 접수하세요. 담당자가 이 화면에서 진행합니다.</p><button class="btn primary" data-act="new">첫 AS 접수</button></div>`;
   else if(!rows.length) body = `<div class="empty"><h3>조건에 맞는 AS가 없습니다</h3><p>구분·단계 필터를 바꾸거나 검색어를 지워 보세요.</p><button class="btn" data-act="reset">필터 초기화</button></div>`;
   else body = `<div class="tbl-wrap"><table class="ledger"><thead><tr>
       <th>접수번호</th><th>고객 / 현장</th><th>현장 담당 (구분)</th><th>처리 담당</th><th>공정</th><th>단계</th><th>확인할 것</th><th class="num">경과</th>
     </tr></thead><tbody>`+rows.map(t=>{
       const o = ownerOf(t), g = groupOf(t), h = handlerOf(t), el = elapsed(t);
       return `<tr data-open="${esc(t._id)}" tabindex="0">
-        <td class="mono" data-c="hide">${esc(t.no||'—')}${+t.round>1?`<br><span class="flag blue">${esc(t.round)}차</span>`:''}</td>
+        <td class="mono" data-c="hide">${esc(t.no||'—')}${+t.round>1?`<br><span class="flag">${esc(t.round)}차</span>`:''}</td>
         <td class="cust"><b>${esc(t.customer||'(고객명 미입력)')}</b><span>${esc(t.address||'')}</span></td>
         <td class="who-cell g-${esc(g)}" data-c="hide"><b>${esc(o.name||'—')}</b><span class="gtag">${esc(groupLabel(g))}</span></td>
-        <td data-c="hide">${h?esc(nameOf(h)):'<span class="flag red">지정 필요</span>'}</td>
+        <td data-c="hide">${h?esc(nameOf(h)):'<span class="flag hot">지정 필요</span>'}</td>
         <td data-c="hide">${esc(t.process||'')}</td>
         <td>${stagePill(t)}</td>
         <td data-c="hide"><div class="flags">${flagsHTML(t)}</div></td>
@@ -319,13 +252,13 @@ function renderList(){
   const ownerChip = S.f.owner ? `<button class="btn" data-act="clear-owner">담당자: ${esc(S.f.owner.split('|')[1]||'')} ✕</button>` : '';
   app.innerHTML = `
     <h1 class="page">AS 현황판</h1>
-    <p class="sub">마감보고서가 올라간 현장의 AS가 들어오면, 현장 담당자의 재직 상태로 자동 구분됩니다. 카드를 누르면 그 구분만 보입니다.${S.offline?' · 저장소에 연결되지 않아 저장되지 않습니다.':''}</p>
+    <p class="sub">접수된 AS는 현장 담당자의 재직 상태로 자동 구분됩니다. 카드를 누르면 그 구분만 보입니다.${S.offline?' · 저장소에 연결되지 않아 저장되지 않습니다.':''}</p>
     <div class="groups">${card('전체','전체')}${GROUPS.map(([g,l])=>card(g,l)).join('')}</div>
     ${unk?`<p class="guide" style="margin-top:-8px">현장 담당자가 비어 있거나 명단에서 확인되지 않는 AS가 ${unk}건 있습니다. <button class="linkish" data-group="미확인">보기</button></p>`:''}
     ${(unC||noH||depN)?`<div class="alerts">
       ${noH?`<button class="alert" data-alert="nohandler" aria-pressed="${S.f.alert==='nohandler'}">처리 담당 지정 필요 ${noH}건</button>`:''}
       ${unC?`<button class="alert" data-alert="uncontacted" aria-pressed="${S.f.alert==='uncontacted'}">접수 후 고객 미연락 ${unC}건</button>`:''}
-      ${depN?`<button class="alert amber" data-alert="deposit" aria-pressed="${S.f.alert==='deposit'}">예치금 차감 대상 ${depN}건</button>`:''}
+      ${depN?`<button class="alert" data-alert="deposit" aria-pressed="${S.f.alert==='deposit'}">예치금 차감 대상 ${depN}건</button>`:''}
     </div>`:''}
     <div class="filters">
       <span><span class="flabel">단계</span>${segHTML('stage',[['진행 중',`진행 중 ${open.length}`],...OPT.stage.map(s=>[s,`${s} ${cnt(s)}`]),['전체','전체']],S.f.stage)}</span>
@@ -352,11 +285,11 @@ function renderList(){
 }
 
 function exportCSV(rows){
-  const head = ['No','접수번호','접수일','회차','접수 경로','고객명','연락처','현장 주소','현장코드','준공일','시공 연도','마감보고서','현장 담당자','구분','퇴사일','처리 담당','공정','문제 내용','비고','비용 사전 안내','진행 단계','첫 연락일','방문 일정','처리 업체','원인','비용 구분','부품비','출장비','공임','기타','비용 합계','비용 부담','고객 청구액','처리 완료일','고객 만족도','처리 결과','고객 피드백','보증','예치금','경과일'];
+  const head = ['No','접수번호','접수일','회차','접수 경로','고객명','연락처','현장 주소','현장코드','준공일','시공 연도','첨부 파일','현장 담당자','구분','퇴사일','처리 담당','공정','문제 내용','비고','비용 사전 안내','진행 단계','첫 연락일','방문 일정','처리 업체','원인','비용 구분','부품비','출장비','공임','기타','비용 합계','비용 부담','고객 청구액','처리 완료일','고객 만족도','처리 결과','고객 피드백','보증','예치금','경과일'];
   const q = v => { const s=String(v??''); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
   const lines = [head.join(',')].concat(rows.map((t,i)=>{
     const o = ownerOf(t), h = handlerOf(t);
-    return [i+1,t.no,t.receivedAt,t.round,t.channel,t.customer,t.phone,t.address,t.siteCode,t.finishedAt,t.builtYear,t.closeReport?'확인':'',o.name,groupLabel(groupOf(t)),t.resignedAt,h?nameOf(h):'',t.process,t.symptom,t.note,t.costNotice?'안내함':'',t.stage||'접수',t.contactedAt,fmtDT(t.visitAt),t.vendor,t.cause,t.charge,
+    return [i+1,t.no,t.receivedAt,t.round,t.channel,t.customer,t.phone,t.address,t.siteCode,t.finishedAt,t.builtYear,(t.files||[]).map(f=>f.name).join(' / '),o.name,groupLabel(groupOf(t)),t.resignedAt,h?nameOf(h):'',t.process,t.symptom,t.note,t.costNotice?'안내함':'',t.stage||'접수',t.contactedAt,fmtDT(t.visitAt),t.vendor,t.cause,t.charge,
       ...COSTS.map(([k])=>t.costs?.[k]?.amt??''),costTotal(t)||'',t.costBearer,t.customerCharge,t.doneAt,t.satisfaction,t.result,t.feedback,warranty(t).label,deposit(t)?.label||'',elapsed(t)].map(q).join(',');
   }));
   const blob = new Blob(['﻿'+lines.join('\r\n')], {type:'text/csv;charset=utf-8'});
@@ -374,7 +307,7 @@ function renderDoc(){
   const canDel = canW && (S.me.isAdmin || (t.createdBy && t.createdBy===S.email));
   const o = ownerOf(t), g = groupOf(t), h = handlerOf(t), w = warranty(t), dep = deposit(t);
   const si = t.stage===HOLD ? -1 : stageIdx(t);
-  const photos = t.photos||[];
+  const photos = t.photos||[], files = t.files||[];
   const log = [...(t.log||[])].reverse();
   app.innerHTML = `
     <div class="back"><button class="btn ghost" data-act="back">← 현황판</button></div>
@@ -386,8 +319,7 @@ function renderDoc(){
           <div class="cust-line">${esc(t.address||'')}</div>
         </div>
         <div class="as-actions">
-          <button class="btn" data-act="copy-intake" title="담당자 단톡방에 보낼 [AS 접수 내용 안내] 문구">접수 안내 복사</button>
-          <button class="btn" data-act="copy-progress">진행 공유 복사</button>
+          <button class="btn" data-act="copy-link" title="담당자에게 보낼 이 AS 기록 주소">링크 복사</button>
           ${canW?'<button class="btn primary" data-act="edit">수정</button>':''}
         </div>
       </div>
@@ -404,7 +336,7 @@ function renderDoc(){
         <section class="sec" style="padding-top:0"><h2><i>1.</i>담당</h2>
           <dl class="kv">
             <div><dt>현장 담당자</dt><dd>${o.name?`${esc(o.name)} <span class="gtag g-${esc(g)}">${esc(o.status||'상태 미확인')}</span>`:'<span class="blank">—</span>'}${o.dept?`<br><span class="guide">${esc(o.dept)}</span>`:''}</dd></div>
-            <div><dt>처리 담당</dt><dd>${h?esc(nameOf(h))+(t.handlerEmail&&t.handlerEmail!==o.email?' <span class="guide">(대신 처리)</span>':''):'<span class="flag red">지정 필요</span>'}</dd></div>
+            <div><dt>처리 담당</dt><dd>${h?esc(nameOf(h))+(t.handlerEmail&&t.handlerEmail!==o.email?' <span class="guide">(대신 처리)</span>':''):'<span class="flag hot">지정 필요</span>'}</dd></div>
             ${g==='퇴사'?`${kv('퇴사일',t.resignedAt)}<div><dt>예치금</dt><dd><span class="flag ${dep.cls}">${esc(dep.label)}</span></dd></div>`:''}
           </dl>
         </section>
@@ -417,11 +349,14 @@ function renderDoc(){
             ${kv('회차',t.round?t.round+'차':'')}
             ${kv('준공일',t.finishedAt||(t.builtYear?t.builtYear+'년 시공':''))}
             <div><dt>보증</dt><dd><span class="flag ${w.cls}">${esc(w.label)}</span></dd></div>
-            ${kv('마감보고서',t.closeReport?'업로드 확인됨':'')}
             ${kv('접수 경로',t.channel)}
           </dl>
         </section>
-        <section class="sec"><h2><i>3.</i>문제 내용</h2>
+        <section class="sec"><h2><i>3.</i>마감보고서 · 첨부 파일</h2><p class="guide">파일 이름을 누르면 내려받습니다.</p>
+          ${files.length?`<ul class="files">${files.map((f,i)=>`<li><span class="ext">${esc(fileExt(f.name))}</span><a href="#" data-dl="${i}">${esc(f.name)}</a><span class="size">${esc(fileSize(f.size))}</span>${canW?`<button data-rmfile="${i}">빼기</button>`:''}</li>`).join('')}</ul>`:'<p class="guide" style="margin:0"><span class="flag hot">마감보고서 없음</span> 이 현장의 마감보고서를 첨부해 주세요.</p>'}
+          ${canW?`<div class="file-pick"><label class="btn" for="file-in">${S.busy==='file'?'올리는 중…':'+ 파일 첨부'}</label><input id="file-in" type="file" multiple hidden></div>`:''}
+        </section>
+        <section class="sec"><h2><i>4.</i>문제 내용</h2>
           <dl class="kv">
             ${kv('공정',t.process,true)}
             ${kv('문제 내용',t.symptom,true)}
@@ -429,7 +364,7 @@ function renderDoc(){
             ${kv('비용 안내',t.costNotice?'부품비·출장비 발생 가능성 사전 안내함':'',true)}
           </dl>
         </section>
-        <section class="sec"><h2><i>4.</i>처리 · 비용</h2>
+        <section class="sec"><h2><i>5.</i>처리 · 비용</h2>
           <dl class="kv">
             ${kv('처리 업체 / 기사',t.vendor,true)}
             ${kv('원인',t.cause)}
@@ -440,7 +375,7 @@ function renderDoc(){
             <tr class="total"><td>합계</td><td class="num">${won(costTotal(t))}</td><td style="font-weight:400">${t.costBearer?esc(t.costBearer)+' 부담':''}${t.customerCharge?` · 고객 청구 ${won(t.customerCharge)}원`:''}</td></tr>
           </tbody></table>
         </section>
-        <section class="sec"><h2><i>5.</i>완료 · 고객 피드백</h2>
+        <section class="sec"><h2><i>6.</i>완료 · 고객 피드백</h2>
           <dl class="kv">
             ${kv('처리 완료일',t.doneAt)}
             ${kv('고객 만족도',t.satisfaction)}
@@ -448,10 +383,10 @@ function renderDoc(){
             ${kv('고객 피드백',t.feedback,true)}
           </dl>
         </section>
-        <section class="sec"><h2><i>6.</i>사진</h2><p class="guide">접수 사진·처리 전후 사진을 올려 두세요. 누르면 원본이 새 탭에서 열립니다.</p>
+        <section class="sec"><h2><i>7.</i>사진</h2><p class="guide">접수 사진·처리 전후 사진을 올려 두세요. 누르면 원본이 새 탭에서 열립니다.</p>
           <div class="photos">
             ${photos.map(p=>`<div class="photo"><a href="${esc(S.photoUrls[p]||'#')}" target="_blank" rel="noopener"><img data-photo="${esc(p)}" ${S.photoUrls[p]?`src="${esc(S.photoUrls[p])}"`:''} alt="AS 현장 사진" loading="lazy"></a>${canW?`<button data-rmphoto="${esc(p)}">빼기</button>`:''}</div>`).join('')}
-            ${canW?`<label class="dropzone" for="photo-in">${S.busy?'올리는 중…':'+ 사진 추가<br>(여러 장 선택 가능)'}</label><input id="photo-in" type="file" accept="image/*" multiple hidden>`:''}
+            ${canW?`<label class="dropzone" for="photo-in">${S.busy===true?'올리는 중…':'+ 사진 추가<br>(여러 장 선택 가능)'}</label><input id="photo-in" type="file" accept="image/*" multiple hidden>`:''}
             ${!photos.length && !canW?'<p class="guide">첨부된 사진이 없습니다.</p>':''}
           </div>
         </section>
@@ -470,8 +405,7 @@ function renderDoc(){
   loadPhotoUrls(photos);
   app.querySelector('[data-act="back"]').onclick=()=>go('list');
   app.querySelector('[data-act="edit"]')?.addEventListener('click',()=>go('edit',t._id));
-  app.querySelector('[data-act="copy-intake"]').onclick=()=>copy(intakeMsg(t),'접수 안내 문구를 복사했습니다. 단톡방에 붙여 넣으세요.');
-  app.querySelector('[data-act="copy-progress"]').onclick=()=>copy(progressMsg(t),'진행 공유 문구를 복사했습니다.');
+  app.querySelector('[data-act="copy-link"]').onclick=()=>copy(link(t),'이 AS 기록 주소를 복사했습니다.');
   app.querySelector('[data-act="del"]')?.addEventListener('click',()=>{ S.confirmDel=true; renderDoc(); });
   app.querySelector('[data-act="del-no"]')?.addEventListener('click',()=>{ S.confirmDel=false; renderDoc(); });
   app.querySelector('[data-act="del-yes"]')?.addEventListener('click',async()=>{
@@ -487,6 +421,24 @@ function renderDoc(){
     ta.disabled = true;
     try{ await api.appendLog(t._id, [{at:new Date().toISOString(), by:S.email, kind:'note', text}]); toast('기록을 남겼습니다.'); }
     catch(_){ ta.disabled=false; toast('저장하지 못했습니다. 인터넷 연결을 확인해 주세요.'); }
+  });
+  app.querySelectorAll('[data-dl]').forEach(a=>a.addEventListener('click',async e=>{
+    e.preventDefault();
+    const f = files[+a.dataset.dl]; if(!f) return;
+    try{ const u = await api.fileUrl(f.path, f.name); const x = document.createElement('a'); x.href = u; x.download = f.name; x.rel = 'noopener'; document.body.appendChild(x); x.click(); x.remove(); }
+    catch(_){ toast('파일을 열지 못했습니다.'); }
+  }));
+  app.querySelectorAll('[data-rmfile]').forEach(b=>b.addEventListener('click',async()=>{
+    const f = files[+b.dataset.rmfile]; if(!f) return;
+    await patch(t._id,{files:files.filter(x=>x.path!==f.path)},`${f.name}을(를) 뺐습니다.`);
+    api.removeFiles([f.path]).catch(()=>{});
+  }));
+  app.querySelector('#file-in')?.addEventListener('change',async e=>{
+    const list=[...e.target.files]; if(!list.length) return;
+    S.busy='file'; renderDoc();
+    const n = await uploadFiles(t._id, list).catch(()=>0);
+    S.busy=false; renderDoc();
+    if(n) toast(`파일 ${n}개를 첨부했습니다.`);
   });
   app.querySelectorAll('[data-rmphoto]').forEach(b=>b.addEventListener('click',async e=>{
     e.preventDefault();
@@ -586,22 +538,36 @@ function readForm(frm){
   data.costTotal = COSTS.reduce((a,[ck])=>a+(Number(data.costs[ck].amt)||0),0);
   return data;
 }
+function attachHTML(t){
+  const files = t.files||[];
+  return `${files.length?`<ul class="files" style="margin-top:12px">${files.map(f=>`<li><span class="ext">${esc(fileExt(f.name))}</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span><span class="size">${esc(fileSize(f.size))}</span></li>`).join('')}</ul>`:''}
+    <div class="file-pick"><label class="btn" for="f_files">+ 파일 선택</label><input id="f_files" type="file" multiple hidden><span class="pending" id="pending"></span></div>`;
+}
+/** 고른 파일을 올리고 AS 기록의 files 목록 뒤에 붙인다. 한 장이 실패해도 나머지는 올린다. */
+async function uploadFiles(id, list){
+  if(!list.length) return 0;
+  const added = [];
+  for(const f of list){
+    try{ added.push(await api.uploadFile(id, f)); }
+    catch(err){ toast(err?.tooLarge ? `${f.name}: 50MB보다 큰 파일은 올릴 수 없습니다.` : `${f.name}을(를) 올리지 못했습니다.`); }
+  }
+  if(added.length){
+    const cur = S.tickets.find(x=>x._id===id);
+    await api.update(id, {files:[...(cur?.files||[]), ...added]});
+  }
+  return added.length;
+}
 function renderEdit(){
   const editing = S.id ? S.tickets.find(x=>x._id===S.id) : null;
-  const t = editing || Object.assign({receivedAt:todayStr(), stage:'접수', cause:'확인 중', charge:'확인 중'}, S.draft||{});
+  const t = editing || {receivedAt:todayStr(), stage:'접수', cause:'확인 중', charge:'확인 중'};
   app.innerHTML = `
     <div class="back"><button class="btn ghost" data-act="cancel">← ${editing?'AS 기록으로':'현황판으로'}</button></div>
     <h1 class="page">${editing?'AS 기록 수정':'AS 접수'}</h1>
-    <p class="sub">${editing?esc(t.no||''):'필요한 칸만 채워도 저장할 수 있습니다. 사진은 저장 후 AS 기록 화면에서 올립니다.'}</p>
-    ${editing?'':`<div class="paste">
-      <b>카톡 접수 안내 붙여넣기</b>
-      <p>단톡방의 [AS 접수 내용 안내] 메시지를 통째로 복사해 붙여 넣으면 고객명·연락처·주소·문제 내용·현장 담당자를 채웁니다.</p>
-      <textarea id="paste-t" placeholder="[AS 접수 내용 안내]&#10;- 고객명: 홍길동(※ 휴직자 OOO 현장)&#10;- 고객번호: 010-...&#10;- 주소: ...&#10;- 문제 내용: ...&#10;- 비고: ..."></textarea>
-      <div class="row"><button type="button" class="btn primary" id="paste-go">자동 채우기</button><span id="paste-msg"></span></div>
-    </div>`}
+    <p class="sub">${editing?esc(t.no||''):'현장 정보를 넣고 마감보고서를 첨부하면, 현장 담당자(또는 처리 담당)가 이 기록을 보고 진행합니다. 필요한 칸만 채워도 저장할 수 있습니다.'}</p>
     <form id="frm" novalidate>
       ${SECTIONS.map(sec=>`<section class="form-sec"><h2><i>${sec.no}.</i>${esc(sec.title)}</h2>${sec.guide?`<p class="guide">${esc(sec.guide)}</p>`:''}
         ${sec.owner?ownerSecHTML(t):''}
+        ${sec.attach?attachHTML(t):''}
         ${sec.costs?`<table class="cost-in"><thead><tr><th style="width:34%">항목</th><th style="width:28%">금액 (원)</th><th>비고</th></tr></thead><tbody>`+
           COSTS.map(([ck,cl])=>`<tr><td>${cl}</td><td><input class="money" inputmode="numeric" id="c_${ck}_amt" data-money value="${esc(won(t.costs?.[ck]?.amt))}" aria-label="${cl} 금액"></td><td><input id="c_${ck}_note" value="${esc(t.costs?.[ck]?.note||'')}" aria-label="${cl} 비고"></td></tr>`).join('')+
           `<tr class="total"><td>합계</td><td class="num" id="cost-total">0</td><td></td></tr></tbody></table>`:''}
@@ -613,17 +579,6 @@ function renderEdit(){
     </form>`;
   const frm = app.querySelector('#frm');
   app.querySelectorAll('[data-act="cancel"]').forEach(b=>b.onclick=()=>editing?go('doc',editing._id):go('list'));
-  app.querySelector('#paste-go')?.addEventListener('click',()=>{
-    const parsed = parseIntake(app.querySelector('#paste-t').value);
-    const n = Object.keys(parsed).filter(k=>k!=='channel').length;
-    if(!n){ app.querySelector('#paste-msg').textContent = '읽을 수 있는 항목이 없습니다. "- 고객명:" 같은 줄이 있는지 확인해 주세요.'; return; }
-    S.draft = Object.assign(readForm(frm), parsed);
-    if(!S.draft.round) S.draft.round = suggestRound(S.draft.address);
-    // 같은 사람의 다른 AS 에 퇴사일이 있으면 가져온다
-    if(!S.draft.resignedAt) S.draft.resignedAt = resignedFromOthers(S.draft);
-    renderEdit();
-    toast(`${n}개 항목을 채웠습니다. 확인 후 저장하세요.`);
-  });
   frm.querySelectorAll('[data-money]').forEach(inp=>inp.addEventListener('input',()=>{
     const n = parseNum(inp.value); const pos = inp.value.length - inp.selectionStart;
     inp.value = n===''?'':won(n); const p = Math.max(0,inp.value.length-pos); inp.setSelectionRange(p,p); updateAuto();
@@ -633,6 +588,8 @@ function renderEdit(){
   function updateAuto(){
     const d = readForm(frm);
     frm.querySelector('#cost-total').textContent = won(d.costTotal);
+    const pend = [...frm.querySelector('#f_files').files];
+    frm.querySelector('#pending').textContent = pend.length ? `저장할 때 함께 올립니다: ${pend.map(f=>f.name).join(', ')}` : '';
     const oe = frm.querySelector('#f_ownerEmail').value;
     frm.querySelectorAll('[data-show="none"]').forEach(el=>el.hidden = oe!==NONE);
     const probe = Object.assign({}, t, d);
@@ -642,7 +599,7 @@ function renderEdit(){
     const h = handlerOf(probe), dep = deposit(probe);
     const box = frm.querySelector('#owner-auto');
     if(!oe) box.innerHTML = '현장 담당자를 고르면 재직·휴직·퇴사 구분과 처리 담당이 자동으로 정해집니다.';
-    else box.innerHTML = `구분: <b class="gtag g-${esc(g)}">${esc(groupLabel(g))}</b> · 처리 담당: ${h?`<b>${esc(nameOf(h))}</b>`:'<b style="color:var(--sev-s)">지정 필요 — 휴직·퇴사자 현장은 대신 처리할 사람을 골라 주세요</b>'}${dep?` · <span class="flag ${dep.cls}">${esc(dep.label)}</span>`:''}`;
+    else box.innerHTML = `구분: <b class="gtag g-${esc(g)}">${esc(groupLabel(g))}</b> · 처리 담당: ${h?`<b>${esc(nameOf(h))}</b>`:'<span class="flag hot">지정 필요</span> 휴직·퇴사자 현장은 대신 처리할 사람을 골라 주세요'}${dep?` · <span class="flag ${dep.cls}">${esc(dep.label)}</span>`:''}`;
     const w = warranty(probe), ca = frm.querySelector('#charge-auto');
     const careless = d.cause==='고객 사용 부주의';
     ca.innerHTML = `<span class="flag ${w.cls}">${esc(w.label)}</span> ` + (careless ? '고객 부주의로 생긴 AS는 비용이 발생할 수 있습니다.' : w.k==='in' ? '준공 후 1년 안이라 원칙적으로 무상입니다.' : w.k==='out' ? '보증 기간이 지나 부품비·출장비가 발생할 수 있습니다. 고객에게 미리 안내해 주세요.' : '준공일이나 시공 연도를 넣으면 보증 기간을 계산합니다.');
@@ -663,12 +620,17 @@ function renderEdit(){
     try{
       if(editing){
         const logs = (editing.stage||'접수')!==data.stage ? [{at:now, by:S.email, kind:'stage', text:data.stage}] : [];
-        await api.appendLog(editing._id, logs, data); toast('저장했습니다.'); go('doc',editing._id);
+        await api.appendLog(editing._id, logs, data);
+        await uploadFiles(editing._id, [...frm.querySelector('#f_files').files]);
+        toast('저장했습니다.'); go('doc',editing._id);
       } else {
-        data.photos=[]; data.createdBy=S.email||null;
+        data.photos=[]; data.files=[]; data.createdBy=S.email||null;
         data.log=[{at:now, by:S.email, kind:'stage', text:'접수'}];
         if(data.stage!=='접수') data.log.push({at:now, by:S.email, kind:'stage', text:data.stage});
-        const newId = await api.insert(data); toast(`${data.no} AS를 접수했습니다.`); S.draft=null; go('doc',newId);
+        const pend = [...frm.querySelector('#f_files').files];
+        const newId = await api.insert(data);
+        await uploadFiles(newId, pend);
+        toast(`${data.no} AS를 접수했습니다.`); go('doc',newId);
       }
     }catch(err){
       btn.disabled=false; btn.textContent= editing?'변경 내용 저장':'AS 접수 저장';
@@ -717,7 +679,7 @@ function renderPeople(){
         <td class="num">${r.open||''}</td>
         <td class="num" data-c="hide">${won(r.cost)||''}</td>
         <td data-c="hide">${esc(r.resigned)}</td>
-        <td class="num" data-c="hide">${r.depN?`<b style="color:var(--sev-s)">${won(r.depCost)||'0'}</b> <span class="guide">(${r.depN}건)</span>`:''}</td>
+        <td class="num" data-c="hide">${r.depN?`<b>${won(r.depCost)||'0'}</b> <span class="guide">(${r.depN}건)</span>`:''}</td>
       </tr>`).join('')}
     </tbody></table></div>`:`<div class="empty"><h3>아직 AS가 없습니다</h3></div>`}`;
   app.querySelectorAll('[data-owner]').forEach(tr=>{
@@ -733,7 +695,8 @@ function renderGuide(){
     <p class="sub">업무지원포털의 A/S·예치금 안내를 정리했습니다. 바뀌면 관리자에게 알려 주세요.</p>
     <section class="form-sec">
       <h2>흐름</h2>
-      <div class="flow"><span>마감보고서 업로드</span><i>→</i><span>AS 접수 (단톡방 안내)</span><i>→</i><span>담당자 구분</span><i>→</i>${STAGES.slice(1).map(s=>`<span>${esc(s)}</span>`).join('<i>→</i>')}</div>
+      <div class="flow"><span class="key">AS 접수 · 현장 정보 입력</span><i>+</i><span class="key">마감보고서 첨부</span><i>→</i><span>재직·휴직·퇴사 구분</span><i>→</i>${STAGES.slice(1).map(s=>`<span>${esc(s)}</span>`).join('<i>→</i>')}</div>
+      <p class="guide" style="margin-top:12px">예전에는 카톡 단톡방으로 접수 내용을 보냈지만, 이제는 이 앱에서 접수합니다. 접수할 때 현장 정보를 넣고 그 현장의 <b>마감보고서</b>를 첨부하면, 현장 담당자(휴직·퇴사자 현장은 처리 담당)가 '내가 처리할 AS'에서 보고 진행합니다.</p>
       <p class="guide" style="margin-top:12px">접수 안내를 받으면 하루 안에 고객에게 연락하고 '고객 연락' 단계로 바꿔 주세요. 하루가 지나도 '접수'에 머물면 현황판에 <b>미연락</b>으로 표시됩니다. 통화·방문·협의 내용은 AS 기록의 <b>진행 기록</b>에 남깁니다.</p>
     </section>
     <section class="form-sec">
@@ -805,7 +768,7 @@ function renderLogin(){
 
 /* ---------- Supabase 연결 ---------- */
 const CFG = window.CLAIM_APP_CONFIG || {};
-const BUCKET = 'claim-photos', TABLE = 'as_tickets';
+const BUCKET = 'claim-photos', FILES = 'as-files', TABLE = 'as_tickets';
 const configured = window.supabase && CFG.supabaseUrl && CFG.supabaseAnonKey && !/YOUR-/.test(CFG.supabaseUrl+CFG.supabaseAnonKey);
 const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
 
@@ -868,6 +831,24 @@ let api = {
   async removePhotos(paths){
     const {error} = await sb.storage.from(BUCKET).remove(paths);
     if(error) throw error;
+  },
+  async uploadFile(id, file){
+    if(file.size > 50*1024*1024) throw {tooLarge:true};
+    // 저장소 경로에는 한글을 쓸 수 없어 임의 이름으로 올리고, 원래 이름은 기록에 남긴다
+    const ext = ((file.name||'').split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'') || 'bin';
+    const path = `as/${id}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+    const {error} = await sb.storage.from(FILES).upload(path, file, {contentType:file.type||'application/octet-stream'});
+    if(error) throw error;
+    return {path, name:file.name, size:file.size, at:new Date().toISOString(), by:S.email};
+  },
+  async removeFiles(paths){
+    const {error} = await sb.storage.from(FILES).remove(paths);
+    if(error) throw error;
+  },
+  async fileUrl(path, name){
+    const {data, error} = await sb.storage.from(FILES).createSignedUrl(path, 60*10, {download:name});
+    if(error) throw error;
+    return data.signedUrl;
   },
   async signUrls(paths){
     const {data} = await sb.storage.from(BUCKET).createSignedUrls(paths, 60*60*6);
@@ -953,7 +934,9 @@ if(DEMO){
     async update(id,p){ return api.appendLog(id,[],p); },
     async remove(id){ S.tickets = S.tickets.filter(x=>x._id!==id); },
     async uploadPhoto(id,f){ const u = URL.createObjectURL(f); S.photoUrls[u]=u; return u; },
-    async removePhotos(){}, async signUrls(){ return []; }
+    async removePhotos(){}, async signUrls(){ return []; },
+    async uploadFile(id,f){ return {path:URL.createObjectURL(f), name:f.name, size:f.size, at:new Date().toISOString(), by:S.email}; },
+    async removeFiles(){}, async fileUrl(p){ return p; }
   };
   S.session = {user:{id:'demo', email:'me@x'}}; S.authReady = true; S.email = 'me@x'; S.staff = true; S.loaded = true;
   S.me = {isAdmin:true, name:'나관리'};
