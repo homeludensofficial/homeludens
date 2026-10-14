@@ -97,12 +97,26 @@ function ownerOf(t){
 }
 const groupOf = t => ownerOf(t).status || '미확인';
 const groupLabel = g => (GROUPS.find(x=>x[0]===g)||[,'담당자 미확인'])[1];
-/** 처리 담당: 따로 지정했으면 그 사람, 아니면 재직 중인 현장 담당자 본인. */
-function handlerOf(t){
-  if(t.handlerEmail) return t.handlerEmail;
+/** 휴직·퇴사자 현장은 현장팀이 맡는다 (2026-10-14 대표 지시). 사람이 바뀌면 이름만 고친다. */
+const FIELD_TEAM = ['김응수','박명철'];
+const TEAM = 'team:field';
+const fieldTeam = () => S.members.filter(m=>FIELD_TEAM.includes(m.name) && normStatus(m.status)==='재직').map(m=>m.email);
+/** 처리 담당 (이메일 목록). 따로 지정했으면 그 사람, 아니면 재직자 현장은 담당자 본인, 휴직·퇴사자 현장은 현장팀. */
+function handlersOf(t){
+  if(t.handlerEmail===TEAM) return fieldTeam();
+  if(t.handlerEmail) return [t.handlerEmail];
   const o = ownerOf(t);
-  return o.status==='재직' && o.email ? o.email : null;
+  if(o.status==='재직') return o.email ? [o.email] : [];
+  if(o.status==='휴직' || o.status==='퇴사') return fieldTeam();
+  return [];
 }
+const isTeam = t => t.handlerEmail===TEAM || (!t.handlerEmail && ['휴직','퇴사'].includes(ownerOf(t).status));
+/** 처리 담당 표시용 이름. 현장팀은 명단에서 못 찾아도 이름으로 보여 준다. */
+function handlerLabel(t){
+  if(isTeam(t)) return '현장팀 ' + FIELD_TEAM.join('·');
+  const h = handlersOf(t); return h.length ? h.map(nameOf).join('·') : '';
+}
+const isMine = t => handlersOf(t).includes(S.email);
 const stageIdx = t => STAGES.indexOf(t.stage||'접수');
 const isOpen = t => (t.stage||'접수')!=='종결';
 function warranty(t){
@@ -125,7 +139,7 @@ function uncontacted(t){
   if((t.stage||'접수')!=='접수' || !t.receivedAt) return 0;
   const n = days(t.receivedAt); return n>=1 ? n : 0;
 }
-const needsHandler = t => isOpen(t) && t.stage!==HOLD && !handlerOf(t);
+const needsHandler = t => isOpen(t) && t.stage!==HOLD && !handlerLabel(t);
 function elapsed(t){ if(!t.receivedAt) return ''; return days(t.receivedAt, (!isOpen(t)||t.stage==='처리 완료') && t.doneAt ? t.doneAt : todayStr()); }
 function nextNo(){
   const y = new Date().getFullYear(), re = new RegExp('^AS-'+y+'-(\\d+)$');
@@ -144,11 +158,52 @@ function flagsHTML(t, opt={}){
   const out = [];
   const w = warranty(t); if(opt.all || w.k!=='in') out.push(`<span class="flag ${w.cls}">${esc(w.label)}</span>`);
   const d = deposit(t); if(d) out.push(`<span class="flag ${d.cls}">${esc(d.label)}</span>`);
-  const u = isOpen(t) ? uncontacted(t) : 0; if(u) out.push(`<span class="flag hot">미연락 ${u}일</span>`);
+  const dl = delayOf(t); if(dl) out.push(`<span class="flag hot">${esc(dl)}</span>`);
   if(needsHandler(t)) out.push(`<span class="flag hot">처리 담당 지정 필요</span>`);
   if(!(t.files||[]).length) out.push(`<span class="flag">마감보고서 없음</span>`);
   if(opt.all && +t.round>1) out.push(`<span class="flag">${esc(t.round)}차 AS</span>`);
   return out.join('');
+}
+
+/* ---------- 카톡 알림 ----------
+   접수·지연 알림 문구를 만들어 카톡으로 보낸다. 휴대폰에서는 공유 창에서 카카오톡을 고르고,
+   PC 에서는 문구를 복사해 단톡방에 붙여 넣는다. (자동 발송은 카카오 알림톡 계약이 있어야 가능) */
+const DELAY_DAYS = 7;
+/** 손이 가야 하는 지연: 접수 후 하루 넘게 미연락, 또는 접수 후 7일이 지나도록 처리 완료 전. */
+function delayOf(t){
+  if(!isOpen(t) || t.stage===HOLD || t.stage==='처리 완료') return '';
+  const u = uncontacted(t); if(u) return `고객 미연락 ${u}일째`;
+  const e = elapsed(t); return e>=DELAY_DAYS ? `접수 ${e}일째 처리 중` : '';
+}
+const shortAddr = a => String(a||'').split(/\s+/).slice(0,3).join(' ');
+function notifyMsg(t){
+  const o = ownerOf(t), g = groupOf(t);
+  return [
+    '[AS 접수 알림]',
+    'AS 접수되었습니다. AS 진행관리에서 확인해 주세요.',
+    '',
+    `- 고객: ${t.customer||''}${t.address?` (${shortAddr(t.address)})`:''}`,
+    `- 현장 담당: ${o.name||'미확인'}${g!=='재직'&&g!=='미확인'?` (${groupLabel(g)})`:''}`,
+    `- 처리 담당: ${handlerLabel(t)||'지정 필요'}`,
+    t.symptom ? `- 내용: ${t.symptom.length>60?t.symptom.slice(0,60)+'…':t.symptom}` : '',
+    '',
+    '▶ '+link(t)
+  ].filter((l,i,a)=>l!=='' || (a[i-1]!=='' && i>0)).join('\n');
+}
+function delayMsg(list){
+  const d = new Date();
+  const lines = [`[AS 지연 알림] ${d.getMonth()+1}/${d.getDate()} 기준 ${list.length}건`, '처리가 늦어지고 있는 AS입니다. 오늘 안에 확인하고 진행 기록을 남겨 주세요.', ''];
+  list.forEach(t=>lines.push(`- ${t.customer||'(고객명 없음)'} · ${handlerLabel(t)||'담당 미지정'} · ${delayOf(t)}`));
+  lines.push('', '▶ '+location.origin+location.pathname);
+  return lines.join('\n');
+}
+/** 휴대폰이면 공유 창(카카오톡 선택), 아니면 복사. 보냈으면 true. */
+async function sendKakao(text){
+  if(navigator.share && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)){
+    try{ await navigator.share({text}); return true; }catch(e){ if(e?.name==='AbortError') return false; }
+  }
+  await copy(text, '알림 문구를 복사했습니다. 카톡 단톡방에 붙여 넣어 주세요.');
+  return true;
 }
 
 /* ---------- 링크 복사 ---------- */
@@ -197,14 +252,14 @@ function filtered(){
     const st = t.stage||'접수';
     if(S.f.stage==='진행 중' && !(isOpen(t) && st!==HOLD)) return false;
     if(S.f.stage!=='진행 중' && S.f.stage!=='전체' && st!==S.f.stage) return false;
-    if(S.f.mine && handlerOf(t)!==S.email) return false;
-    if(S.f.alert==='uncontacted' && !uncontacted(t)) return false;
+    if(S.f.mine && !isMine(t)) return false;
+    if(S.f.alert==='delayed' && !delayOf(t)) return false;
     if(S.f.alert==='nohandler' && !needsHandler(t)) return false;
     if(S.f.alert==='deposit' && deposit(t)?.k!=='yes') return false;
     if(S.f.owner && ownerKey(t)!==S.f.owner) return false;
     if(q){
-      const o = ownerOf(t), h = handlerOf(t);
-      const hay = [t.no,t.customer,t.phone,t.address,t.siteCode,t.symptom,t.vendor,o.name,h?nameOf(h):''].join(' ').toLowerCase();
+      const o = ownerOf(t), h = handlerLabel(t);
+      const hay = [t.no,t.customer,t.phone,t.address,t.siteCode,t.symptom,t.vendor,o.name,h].join(' ').toLowerCase();
       if(!hay.includes(q)) return false;
     }
     return true;
@@ -218,16 +273,16 @@ function renderList(){
   const card = (g,label) => {
     const inG = g==='전체' ? all : all.filter(t=>groupOf(t)===g);
     const o = inG.filter(t=>isOpen(t) && t.stage!==HOLD);
-    const nh = o.filter(needsHandler).length, un = o.filter(uncontacted).length;
+    const nh = o.filter(needsHandler).length, un = o.filter(t=>delayOf(t)).length;
     const dep = g==='퇴사' ? inG.filter(t=>deposit(t)?.k==='yes' && isOpen(t)).length : 0;
-    const warn = nh ? `담당 지정 필요 ${nh}건` : un ? `미연락 ${un}건` : dep ? `예치금 차감 대상 ${dep}건` : '';
+    const warn = nh ? `담당 지정 필요 ${nh}건` : un ? `지연 ${un}건` : dep ? `예치금 차감 대상 ${dep}건` : '';
     return `<button type="button" class="gcard g-${esc(g)}" data-group="${esc(g)}" aria-pressed="${S.f.group===g}">
       <small>${esc(label)}<em>총 ${inG.length}건</em></small>
       <strong>${o.length}<em>건 진행 중</em></strong>
       <span class="warn ${warn?'':'ok'}">${warn?esc(warn):'밀린 건 없음'}</span></button>`;
   };
   const unk = all.filter(t=>groupOf(t)==='미확인').length;
-  const unC = open.filter(uncontacted).length, noH = open.filter(needsHandler).length, depN = all.filter(t=>isOpen(t)&&deposit(t)?.k==='yes').length;
+  const delayed = open.filter(t=>delayOf(t)), unC = delayed.length, noH = open.filter(needsHandler).length, depN = all.filter(t=>isOpen(t)&&deposit(t)?.k==='yes').length;
   const cnt = s => all.filter(t=>(t.stage||'접수')===s).length;
   const rows = filtered();
   let body;
@@ -238,16 +293,16 @@ function renderList(){
   else body = `<div class="tbl-wrap"><table class="ledger"><thead><tr>
       <th>접수번호</th><th>고객 / 현장</th><th>현장 담당 (구분)</th><th>처리 담당</th><th>공정</th><th>단계</th><th>확인할 것</th><th class="num">경과</th>
     </tr></thead><tbody>`+rows.map(t=>{
-      const o = ownerOf(t), g = groupOf(t), h = handlerOf(t), el = elapsed(t);
+      const o = ownerOf(t), g = groupOf(t), h = handlerLabel(t), el = elapsed(t);
       return `<tr data-open="${esc(t._id)}" tabindex="0">
         <td class="mono" data-c="hide">${esc(t.no||'—')}${+t.round>1?`<br><span class="flag">${esc(t.round)}차</span>`:''}</td>
         <td class="cust"><b>${esc(t.customer||'(고객명 미입력)')}</b><span>${esc(t.address||'')}</span></td>
         <td class="who-cell g-${esc(g)}" data-c="hide"><b>${esc(o.name||'—')}</b><span class="gtag">${esc(groupLabel(g))}</span></td>
-        <td data-c="hide">${h?esc(nameOf(h)):'<span class="flag hot">지정 필요</span>'}</td>
+        <td data-c="hide" style="white-space:nowrap">${h?esc(h):'<span class="flag hot">지정 필요</span>'}</td>
         <td data-c="hide">${esc(t.process||'')}</td>
         <td>${stagePill(t)}</td>
         <td data-c="hide"><div class="flags">${flagsHTML(t)}</div></td>
-        <td class="num ${isOpen(t)&&el>=7?'over':''}">${el===''?'':el+'일'}</td>
+        <td class="num ${delayOf(t)?'over':''}">${el===''?'':el+'일'}</td>
       </tr>`;}).join('')+`</tbody></table></div>`;
   const ownerChip = S.f.owner ? `<button class="btn" data-act="clear-owner">담당자: ${esc(S.f.owner.split('|')[1]||'')} ✕</button>` : '';
   app.innerHTML = `
@@ -257,12 +312,12 @@ function renderList(){
     ${unk?`<p class="guide" style="margin-top:-8px">현장 담당자가 비어 있거나 명단에서 확인되지 않는 AS가 ${unk}건 있습니다. <button class="linkish" data-group="미확인">보기</button></p>`:''}
     ${(unC||noH||depN)?`<div class="alerts">
       ${noH?`<button class="alert" data-alert="nohandler" aria-pressed="${S.f.alert==='nohandler'}">처리 담당 지정 필요 ${noH}건</button>`:''}
-      ${unC?`<button class="alert" data-alert="uncontacted" aria-pressed="${S.f.alert==='uncontacted'}">접수 후 고객 미연락 ${unC}건</button>`:''}
+      ${unC?`<button class="alert" data-alert="delayed" aria-pressed="${S.f.alert==='delayed'}">지연 ${unC}건 (미연락·${DELAY_DAYS}일 경과)</button><button class="btn primary" data-act="remind">지연 알림 카톡 보내기</button>`:''}
       ${depN?`<button class="alert" data-alert="deposit" aria-pressed="${S.f.alert==='deposit'}">예치금 차감 대상 ${depN}건</button>`:''}
     </div>`:''}
     <div class="filters">
       <span><span class="flabel">단계</span>${segHTML('stage',[['진행 중',`진행 중 ${open.length}`],...OPT.stage.map(s=>[s,`${s} ${cnt(s)}`]),['전체','전체']],S.f.stage)}</span>
-      <button type="button" class="btn ${S.f.mine?'primary':''}" data-act="mine" aria-pressed="${S.f.mine}">내가 처리할 AS ${all.filter(t=>isOpen(t)&&handlerOf(t)===S.email).length}건</button>
+      <button type="button" class="btn ${S.f.mine?'primary':''}" data-act="mine" aria-pressed="${S.f.mine}">내가 처리할 AS ${all.filter(t=>isOpen(t)&&isMine(t)).length}건</button>
       ${ownerChip}
       <input class="search" id="f-q" type="search" placeholder="고객명, 주소, 연락처, 담당자 검색" value="${esc(S.f.q)}">
       ${all.length?'<button class="btn ghost" data-act="csv">CSV 내보내기</button>':''}
@@ -280,6 +335,7 @@ function renderList(){
   app.querySelector('[data-act="new"]')?.addEventListener('click',()=>go('edit'));
   app.querySelector('[data-act="reset"]')?.addEventListener('click',()=>{ S.f={group:'전체',stage:'전체',q:'',mine:false,alert:'',owner:''}; renderList(); });
   app.querySelector('[data-act="mine"]')?.addEventListener('click',()=>{ S.f.mine=!S.f.mine; renderList(); });
+  app.querySelector('[data-act="remind"]')?.addEventListener('click',()=>sendKakao(delayMsg(delayed)));
   app.querySelector('[data-act="clear-owner"]')?.addEventListener('click',()=>{ S.f.owner=''; renderList(); });
   app.querySelector('[data-act="csv"]')?.addEventListener('click',()=>exportCSV(rows));
 }
@@ -288,8 +344,8 @@ function exportCSV(rows){
   const head = ['No','접수번호','접수일','회차','접수 경로','고객명','연락처','현장 주소','현장코드','준공일','시공 연도','첨부 파일','현장 담당자','구분','퇴사일','처리 담당','공정','문제 내용','비고','비용 사전 안내','진행 단계','첫 연락일','방문 일정','처리 업체','원인','비용 구분','부품비','출장비','공임','기타','비용 합계','비용 부담','고객 청구액','처리 완료일','고객 만족도','처리 결과','고객 피드백','보증','예치금','경과일'];
   const q = v => { const s=String(v??''); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
   const lines = [head.join(',')].concat(rows.map((t,i)=>{
-    const o = ownerOf(t), h = handlerOf(t);
-    return [i+1,t.no,t.receivedAt,t.round,t.channel,t.customer,t.phone,t.address,t.siteCode,t.finishedAt,t.builtYear,(t.files||[]).map(f=>f.name).join(' / '),o.name,groupLabel(groupOf(t)),t.resignedAt,h?nameOf(h):'',t.process,t.symptom,t.note,t.costNotice?'안내함':'',t.stage||'접수',t.contactedAt,fmtDT(t.visitAt),t.vendor,t.cause,t.charge,
+    const o = ownerOf(t), h = handlerLabel(t);
+    return [i+1,t.no,t.receivedAt,t.round,t.channel,t.customer,t.phone,t.address,t.siteCode,t.finishedAt,t.builtYear,(t.files||[]).map(f=>f.name).join(' / '),o.name,groupLabel(groupOf(t)),t.resignedAt,h,t.process,t.symptom,t.note,t.costNotice?'안내함':'',t.stage||'접수',t.contactedAt,fmtDT(t.visitAt),t.vendor,t.cause,t.charge,
       ...COSTS.map(([k])=>t.costs?.[k]?.amt??''),costTotal(t)||'',t.costBearer,t.customerCharge,t.doneAt,t.satisfaction,t.result,t.feedback,warranty(t).label,deposit(t)?.label||'',elapsed(t)].map(q).join(',');
   }));
   const blob = new Blob(['﻿'+lines.join('\r\n')], {type:'text/csv;charset=utf-8'});
@@ -305,12 +361,17 @@ function renderDoc(){
   if(!t){ app.innerHTML = `<div class="empty" style="margin-top:28px"><h3>AS 기록을 찾을 수 없습니다</h3><p>삭제되었거나 아직 불러오는 중입니다.</p><button class="btn" data-act="back">현황판으로</button></div>`; app.querySelector('[data-act="back"]').onclick=()=>go('list'); return; }
   const canW = !S.offline;
   const canDel = canW && (S.me.isAdmin || (t.createdBy && t.createdBy===S.email));
-  const o = ownerOf(t), g = groupOf(t), h = handlerOf(t), w = warranty(t), dep = deposit(t);
+  const o = ownerOf(t), g = groupOf(t), h = handlerLabel(t), w = warranty(t), dep = deposit(t);
   const si = t.stage===HOLD ? -1 : stageIdx(t);
   const photos = t.photos||[], files = t.files||[];
   const log = [...(t.log||[])].reverse();
   app.innerHTML = `
     <div class="back"><button class="btn ghost" data-act="back">← 현황판</button></div>
+    ${canW && isOpen(t) && !t.notifiedAt ? `<div class="notify">
+      <div class="notify-txt"><b>담당자에게 접수 알림을 보내 주세요</b><span>처리 담당: ${esc(h||'지정 필요')} · 휴대폰에서는 카카오톡을 골라 보내고, PC에서는 문구가 복사됩니다.</span></div>
+      <pre class="notify-msg">${esc(notifyMsg(t))}</pre>
+      <div class="notify-act"><button class="btn primary" data-act="notify">카톡으로 접수 알림 보내기</button><button class="btn ghost" data-act="notify-skip">보내지 않음</button></div>
+    </div>` : ''}
     <div class="doc" style="margin-top:12px">
       <div class="as-head">
         <div style="min-width:0">
@@ -319,7 +380,7 @@ function renderDoc(){
           <div class="cust-line">${esc(t.address||'')}</div>
         </div>
         <div class="as-actions">
-          <button class="btn" data-act="copy-link" title="담당자에게 보낼 이 AS 기록 주소">링크 복사</button>
+          <button class="btn" data-act="notify" title="처리 담당에게 보낼 접수 알림 문구">카톡 알림${t.notifiedAt?' 다시 보내기':''}</button>
           ${canW?'<button class="btn primary" data-act="edit">수정</button>':''}
         </div>
       </div>
@@ -336,7 +397,7 @@ function renderDoc(){
         <section class="sec" style="padding-top:0"><h2><i>1.</i>담당</h2>
           <dl class="kv">
             <div><dt>현장 담당자</dt><dd>${o.name?`${esc(o.name)} <span class="gtag g-${esc(g)}">${esc(o.status||'상태 미확인')}</span>`:'<span class="blank">—</span>'}${o.dept?`<br><span class="guide">${esc(o.dept)}</span>`:''}</dd></div>
-            <div><dt>처리 담당</dt><dd>${h?esc(nameOf(h))+(t.handlerEmail&&t.handlerEmail!==o.email?' <span class="guide">(대신 처리)</span>':''):'<span class="flag hot">지정 필요</span>'}</dd></div>
+            <div><dt>처리 담당</dt><dd>${h?esc(h)+(t.handlerEmail&&t.handlerEmail!==TEAM&&t.handlerEmail!==o.email?' <span class="guide">(대신 처리)</span>':''):'<span class="flag hot">지정 필요</span>'}</dd></div>
             ${g==='퇴사'?`${kv('퇴사일',t.resignedAt)}<div><dt>예치금</dt><dd><span class="flag ${dep.cls}">${esc(dep.label)}</span></dd></div>`:''}
           </dl>
         </section>
@@ -405,7 +466,11 @@ function renderDoc(){
   loadPhotoUrls(photos);
   app.querySelector('[data-act="back"]').onclick=()=>go('list');
   app.querySelector('[data-act="edit"]')?.addEventListener('click',()=>go('edit',t._id));
-  app.querySelector('[data-act="copy-link"]').onclick=()=>copy(link(t),'이 AS 기록 주소를 복사했습니다.');
+  app.querySelectorAll('[data-act="notify"]').forEach(b=>b.addEventListener('click',async()=>{
+    if(!await sendKakao(notifyMsg(t))) return;
+    if(canW) api.appendLog(t._id, [{at:new Date().toISOString(), by:S.email, kind:'note', text:`카톡 접수 알림 보냄 → ${handlerLabel(t)||'담당 미지정'}`}], {notifiedAt:new Date().toISOString()}).catch(()=>{});
+  }));
+  app.querySelector('[data-act="notify-skip"]')?.addEventListener('click',()=>patch(t._id,{notifiedAt:'skip'},'알림 안내를 닫았습니다.'));
   app.querySelector('[data-act="del"]')?.addEventListener('click',()=>{ S.confirmDel=true; renderDoc(); });
   app.querySelector('[data-act="del-no"]')?.addEventListener('click',()=>{ S.confirmDel=false; renderDoc(); });
   app.querySelector('[data-act="del-yes"]')?.addEventListener('click',async()=>{
@@ -510,8 +575,8 @@ function ownerSecHTML(t){
   return `<div class="grid">
     <div class="fld"><label for="f_ownerEmail">현장 담당자 (마감보고서 담당)</label>
       <select id="f_ownerEmail"><option value="">선택하세요</option>${memberOptions(ownerSel)}<option value="${NONE}" ${ownerSel===NONE?'selected':''}>명단에 없는 사람 (직접 입력)</option></select></div>
-    <div class="fld"><label for="f_handlerEmail">처리 담당 (대신 처리할 사람)</label>
-      <select id="f_handlerEmail"><option value="">현장 담당자 본인</option>${memberOptions(t.handlerEmail||'',true)}</select></div>
+    <div class="fld"><label for="f_handlerEmail">처리 담당</label>
+      <select id="f_handlerEmail"><option value="">자동 (재직자 현장은 본인, 휴직·퇴사자 현장은 현장팀)</option><option value="${TEAM}" ${t.handlerEmail===TEAM?'selected':''}>현장팀 ${esc(FIELD_TEAM.join('·'))}</option><optgroup label="다른 사람 지정">${memberOptions(t.handlerEmail||'',true)}</optgroup></select></div>
     <div class="fld" data-show="none"><label for="f_ownerName">담당자 이름</label><input type="text" id="f_ownerName" value="${esc(t.ownerName||'')}"></div>
     <div class="fld" data-show="none"><span class="lbl">담당자 상태</span><div class="chips">${OPT.ownerStatus.map((s,i)=>`<label class="chip"><input type="radio" name="f_ownerStatus" id="f_ownerStatus_${i}" value="${s}" ${normStatus(t.ownerStatus)===s?'checked':''}><span>${s}</span></label>`).join('')}</div></div>
     <div class="fld" data-show="out"><label for="f_resignedAt">퇴사일</label><input type="date" id="f_resignedAt" value="${esc(t.resignedAt||'')}"><span class="hint">퇴사 후 1년 안의 AS는 예치금 차감 대상입니다.</span></div>
@@ -596,10 +661,10 @@ function renderEdit(){
     const g = groupOf(probe);
     frm.querySelectorAll('[data-show="out"]').forEach(el=>el.hidden = g!=='퇴사');
     if(g==='퇴사' && !frm.querySelector('#f_resignedAt').value){ const r = resignedFromOthers(probe); if(r){ frm.querySelector('#f_resignedAt').value = r; probe.resignedAt = r; } }
-    const h = handlerOf(probe), dep = deposit(probe);
+    const h = handlerLabel(probe), dep = deposit(probe);
     const box = frm.querySelector('#owner-auto');
     if(!oe) box.innerHTML = '현장 담당자를 고르면 재직·휴직·퇴사 구분과 처리 담당이 자동으로 정해집니다.';
-    else box.innerHTML = `구분: <b class="gtag g-${esc(g)}">${esc(groupLabel(g))}</b> · 처리 담당: ${h?`<b>${esc(nameOf(h))}</b>`:'<span class="flag hot">지정 필요</span> 휴직·퇴사자 현장은 대신 처리할 사람을 골라 주세요'}${dep?` · <span class="flag ${dep.cls}">${esc(dep.label)}</span>`:''}`;
+    else box.innerHTML = `구분: <b class="gtag g-${esc(g)}">${esc(groupLabel(g))}</b> · 처리 담당: ${h?`<b>${esc(h)}</b>`:'<span class="flag hot">지정 필요</span> 현장 담당자 상태를 확인하거나 처리할 사람을 골라 주세요'}${dep?` · <span class="flag ${dep.cls}">${esc(dep.label)}</span>`:''}`;
     const w = warranty(probe), ca = frm.querySelector('#charge-auto');
     const careless = d.cause==='고객 사용 부주의';
     ca.innerHTML = `<span class="flag ${w.cls}">${esc(w.label)}</span> ` + (careless ? '고객 부주의로 생긴 AS는 비용이 발생할 수 있습니다.' : w.k==='in' ? '준공 후 1년 안이라 원칙적으로 무상입니다.' : w.k==='out' ? '보증 기간이 지나 부품비·출장비가 발생할 수 있습니다. 고객에게 미리 안내해 주세요.' : '준공일이나 시공 연도를 넣으면 보증 기간을 계산합니다.');
@@ -703,9 +768,9 @@ function renderGuide(){
       <h2>현장 담당자 구분</h2>
       <p class="guide">현장 담당자의 상태는 업무지원포털 '직원' 시트에서 10분마다 가져옵니다.</p>
       <div class="rules">
-        <div class="rule g-재직"><h3><span class="gtag">재직자 현장</span></h3><ul><li>현장 담당자 본인이 처리합니다.</li><li>처리 담당을 비워 두면 본인으로 잡힙니다.</li></ul></div>
-        <div class="rule g-휴직"><h3><span class="gtag">휴직자 현장</span></h3><ul><li>접수할 때 대신 처리할 사람을 지정합니다.</li><li>지정 전까지 현황판에 '처리 담당 지정 필요'로 뜹니다.</li></ul></div>
-        <div class="rule g-퇴사"><h3><span class="gtag">퇴사자 현장</span></h3><ul><li>대신 처리할 사람을 지정합니다.</li><li>퇴사 후 1년 안에 생긴 AS 비용은 그 사람의 예치금에서 뺍니다.</li><li>1년이 지나면 남은 예치금을 돌려줍니다.</li></ul></div>
+        <div class="rule"><h3>재직자 현장</h3><ul><li>현장 담당자 본인이 처리합니다.</li><li>처리 담당을 '자동'으로 두면 본인으로 잡힙니다.</li></ul></div>
+        <div class="rule"><h3>휴직자 현장</h3><ul><li>현장팀 ${esc(FIELD_TEAM.join('·'))} 프로가 진행합니다. (자동 배정)</li><li>다른 사람이 맡을 때만 처리 담당을 바꿉니다.</li></ul></div>
+        <div class="rule"><h3>퇴사자 현장</h3><ul><li>현장팀 ${esc(FIELD_TEAM.join('·'))} 프로가 진행합니다. (자동 배정)</li><li>퇴사 후 1년 안에 생긴 AS 비용은 그 사람의 예치금에서 뺍니다.</li><li>1년이 지나면 남은 예치금을 돌려줍니다.</li></ul></div>
       </div>
     </section>
     <section class="form-sec">
@@ -911,7 +976,7 @@ document.getElementById('btn-logout').addEventListener('click', ()=>sb ? sb.auth
 const DEMO = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && location.hash==='#demo';
 if(DEMO){
   document.body.insertAdjacentHTML('afterbegin','<div class="demo-bar">미리보기 — 가짜 데이터입니다. 저장되지 않습니다.</div>');
-  const mem = [['kim@x','김도윤','디자인1팀','팀장','재직'],['kwon@x','권혁찬','디자인1팀','디자이너','재직'],['seo@x','서나영','디자인2팀','팀장','휴직'],['park@x','박지후','디자인2팀','디자이너','퇴사'],['lee@x','이수민','디자인1팀','디자이너','재직'],['me@x','나관리','경영지원','대표','재직']];
+  const mem = [['kim@x','김도윤','디자인1팀','팀장','재직'],['kwon@x','권혁찬','디자인1팀','디자이너','재직'],['seo@x','서나영','디자인2팀','팀장','휴직'],['park@x','박지후','디자인2팀','디자이너','퇴사'],['lee@x','이수민','디자인1팀','디자이너','재직'],['me@x','나관리','경영지원','대표','재직'],['ks@x','김응수','현장팀','프로','재직'],['mc@x','박명철','현장팀','프로','재직']];
   S.members = mem.map(([email,name,dept,title,status])=>({email,name,dept,title,status}));
   const d = n => { const x = new Date(); x.setDate(x.getDate()-n); return dstr(x); };
   const iso = n => { const x = new Date(); x.setDate(x.getDate()-n); return x.toISOString(); };
