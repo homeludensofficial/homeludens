@@ -4,7 +4,7 @@
 
 | 폴더 | 내용 | 주소 |
 |---|---|---|
-| `claim/` | 클레임 보고서 (Supabase) | https://claim.homeludens.co.kr/claim/ |
+| `claim/` | 클레임 보고서 (Supabase) | https://claim.homeludens.co.kr/ (→ claim/) |
 
 `claim/` 원본과 DB 설정·운영 문서는 `homeludens_materials/claim-app/` 에 있습니다.
 여기는 배포본만 둡니다. 비밀값은 넣지 않습니다(`config.js` 의 anon 키는 공개용).
