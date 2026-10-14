@@ -148,13 +148,10 @@ function render(){
   if(S.loaded && !S.staff){ document.getElementById('nav').hidden = true; document.getElementById('btn-new').hidden = true; renderBlocked(); return; }
   document.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-current', String(b.dataset.view===S.view || (b.dataset.view==='list' && (S.view==='doc'||S.view==='edit')))));
   document.getElementById('btn-new').hidden = !S.canWrite || !S.session;
-  document.getElementById('tab-admin').hidden = !S.me.isAdmin;
-  if(S.view==='admin' && !S.me.isAdmin) S.view='list';
   if(S.view==='list') renderList();
   else if(S.view==='doc') renderDoc();
   else if(S.view==='edit') renderEdit();
   else if(S.view==='std') renderStd();
-  else if(S.view==='admin') renderAdmin();
 }
 
 /* ---------- 관리대장 ---------- */
@@ -486,31 +483,6 @@ function renderStd(){
     try{ await api.saveCfg({minor: mi===''?'':Number(mi), major: ma===''?'':Number(ma)}); toast('결재 기준을 저장했습니다.'); }
     catch(e){ toast('저장하지 못했습니다. 권한을 확인해 주세요.'); }
   });
-}
-
-/* ---------- 직원 명단 (관리자) ---------- */
-function renderAdmin(){
-  const active = S.members.filter(m=>m.status==='재직');
-  const off = S.members.filter(m=>m.status!=='재직');
-  const order = m => m.role ? -ROLES.indexOf(m.role) : 0;
-  const rows = [...active].sort((a,b)=>order(a)-order(b) || a.dept.localeCompare(b.dept) || a.name.localeCompare(b.name));
-  const last = S.members.reduce((t,m)=>m.synced_at>t?m.synced_at:t,'');
-  app.innerHTML = `
-    <h1 class="page">직원 명단</h1>
-    <p class="sub">업무지원포털 '직원' 시트에서 10분마다 가져옵니다. 사람 추가·직급 변경·퇴사 처리는 포털 시트에서 하세요.${last?` 마지막 반영: ${esc(new Date(last).toLocaleString('ko-KR'))}`:''}</p>
-    <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))">
-      <div class="kpi"><small>로그인 가능 (재직)</small><strong>${active.length}<em>명</em></strong></div>
-      <div class="kpi"><small>결재자</small><strong>${active.filter(m=>m.role).length}<em>명</em></strong></div>
-      <div class="kpi"><small>차단 (퇴사·휴직)</small><strong>${off.length}<em>명</em></strong></div>
-    </div>
-    <div class="tbl-wrap"><table class="ledger" style="cursor:default"><thead><tr><th>이름</th><th>부서</th><th>직급</th><th>결재 칸</th><th>이메일</th></tr></thead><tbody>
-      ${rows.map(m=>`<tr style="cursor:default">
-        <td><b>${esc(m.name)}</b>${m.is_admin?' <span class="pill ex">관리자</span>':''}</td>
-        <td>${esc(m.dept)}</td><td>${esc(m.title)}</td>
-        <td>${m.role?`<span class="pill st-처리중">${esc(m.role)}</span>`:'<span class="guide">—</span>'}</td>
-        <td class="mono">${esc(m.email)}</td></tr>`).join('')}
-    </tbody></table></div>
-    <p class="guide" style="margin-top:12px">결재 칸은 직급이 팀장·본부장·부대표·대표로 시작하면 자동으로 정해집니다. 퇴사·휴직으로 바뀐 사람은 다음 반영 때부터 로그인해도 아무것도 볼 수 없습니다.</p>`;
 }
 
 function renderBlocked(){
