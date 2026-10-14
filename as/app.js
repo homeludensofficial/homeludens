@@ -769,7 +769,7 @@ function renderLogin(){
   app.innerHTML = `
     <div class="login">
       <h1 class="page">로그인</h1>
-      <p class="sub">업무지원포털에 등록된 이메일로 6자리 로그인 코드를 받아 접속합니다. 클레임 보고서에 로그인했다면 그대로 들어와집니다.</p>
+      <p class="sub">업무지원포털에 등록된 이메일로 6자리 로그인 코드를 받아 접속합니다. 비밀번호는 없습니다.</p>
       <form id="lf" class="form-sec" novalidate>
         <div class="fld"><label for="login-email">이메일 (업무지원포털과 같은 주소)</label><input type="text" id="login-email" inputmode="email" autocomplete="email" placeholder="name@homeludens.co.kr"></div>
         <button type="submit" class="btn primary" id="login-send" style="margin-top:12px">로그인 코드 받기</button>

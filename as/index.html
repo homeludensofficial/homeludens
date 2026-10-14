@@ -224,8 +224,6 @@ table.ledger{width:100%;border-collapse:collapse;font-size:13px}
 
 /* ---------- AS 전용 ---------- */
 :root{--g-on:var(--g-on-c);--g-leave:var(--sev-a);--g-out:var(--sev-s);--g-unk:var(--ink-3)}
-a.tab{text-decoration:none;display:inline-flex;align-items:center}
-a.tab::after{content:"↗";font-size:11px;margin-left:3px;color:var(--ink-3)}
 @media (max-width:640px){.tabs{order:3;width:100%;overflow-x:auto}.tab{white-space:nowrap}}
 
 /* 구분 카드: 재직자 / 휴직자 / 퇴사자 현장 */
@@ -331,7 +329,6 @@ button.step:disabled{cursor:default;color:inherit}
       <button class="tab" data-view="list">현황판</button>
       <button class="tab" data-view="people">담당자별</button>
       <button class="tab" data-view="guide">처리 기준</button>
-      <a class="tab" href="../claim/">클레임 보고서</a>
     </nav>
     <button class="btn primary" id="btn-new" hidden>+ AS 접수</button>
     <div class="who" id="who" hidden><span id="who-email"></span><button class="btn ghost" id="btn-logout">로그아웃</button></div>
