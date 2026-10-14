@@ -42,7 +42,7 @@ const SECTIONS = [
   {no:'1', title:'사고 개요 및 상세 경위', guide:'사실 중심의 발생 상황을 육하원칙에 따라 기재해 주세요.', fields:[
     ['occurredAt','발생일시','datetime'],
     ['process','발생 공정','multi',{wide:true}],
-    ['contractor','시공 업체','text',{ph:'(업체명) / (시공자) / (전화번호)',wide:true}],
+    ['contractor','시공 업체','vendors',{wide:true}],
     ['summary','주요 사고내용','textarea',{wide:true}],
     ['schedFinish','기존일정 (마감)','date'],
     ['schedMoveIn','기존일정 (입주)','date'],
@@ -108,6 +108,13 @@ const costTotal = c => COSTS.reduce((a,[k]) => a + (Number(c?.costs?.[k]?.amt)||
 // 여러 개 고를 수 있는 항목: 예전 보고서는 문자열 하나, 새 보고서는 배열
 const toArr = v => Array.isArray(v) ? v.filter(Boolean) : (v ? [v] : []);
 const joinV = v => toArr(v).join(', ');
+// 시공 업체 여러 곳: 새 보고서는 contractors 배열, 예전 보고서는 '업체 / 시공자 / 전화' 글자 하나
+function vendorsOf(c){
+  if(Array.isArray(c.contractors) && c.contractors.length) return c.contractors;
+  if(!c.contractor) return [];
+  return String(c.contractor).split(/\s*;\s*/).filter(Boolean).map(t=>{ const [name='',worker='',phone=''] = t.split(/\s*\/\s*/); return {name,worker,phone}; });
+}
+const vendorLine = v => [v.name,v.worker,v.phone].map(x=>String(x||'').trim()).filter(Boolean).join(' / ');
 const statusOf = c => c.closed==='종결' ? '종결' : (toArr(c.action).length ? '처리중' : '접수');
 function elapsed(c){
   if(!c.receivedAt) return '';
@@ -266,6 +273,7 @@ function valHTML(c,key,type){
   if(type==='money') v = v!==''&&v!=null ? won(v)+' 원' : '';
   else if(type==='datetime') v = fmtDate(v);
   else if(type==='multi') v = joinV(v);
+  else if(type==='vendors') v = vendorsOf(c).map(vendorLine).filter(Boolean).join('\n');
   return v ? `<dd>${esc(v)}</dd>` : `<dd class="blank">—</dd>`;
 }
 async function renderDoc(){
@@ -371,6 +379,14 @@ async function patch(id,data,msg){
 }
 
 /* ---------- 작성 / 수정 ---------- */
+function vendorRowHTML(v={}){
+  return `<div class="vendor-row">
+    <input type="text" data-v="name" value="${esc(v.name||'')}" placeholder="업체명" aria-label="업체명">
+    <input type="text" data-v="worker" value="${esc(v.worker||'')}" placeholder="시공자" aria-label="시공자">
+    <input type="text" data-v="phone" value="${esc(v.phone||'')}" placeholder="전화번호" inputmode="tel" aria-label="전화번호">
+    <button type="button" class="btn ghost" data-act="vendor-del" aria-label="이 업체 빼기">×</button>
+  </div>`;
+}
 function fieldHTML(c,[key,label,type,o]){
   const v = c[key] ?? '';
   const id = 'f_'+key, wide = (o?.wide||type==='textarea')?' wide':'';
@@ -390,6 +406,12 @@ function fieldHTML(c,[key,label,type,o]){
     const arr = toArr(v);
     input = `<div class="chips">`+OPT[key].map((op,i)=>`<label class="chip"><input type="checkbox" name="${id}" id="${id}_${i}" value="${esc(op)}" ${arr.includes(op)?'checked':''}><span>${esc(op)}</span></label>`).join('')+`</div>`;
     return `<div class="fld${wide}"><span class="lbl">${esc(label)} <span class="guide" style="font-weight:400">· 여러 개 선택 가능</span></span>${input}</div>`;
+  }
+  if(type==='vendors'){
+    const list = vendorsOf(c);
+    return `<div class="fld${wide}"><span class="lbl">${esc(label)} <span class="guide" style="font-weight:400">· 여러 곳이면 + 업체 추가</span></span>
+      <div class="vendors" id="${id}">${(list.length?list:[{}]).map(vendorRowHTML).join('')}</div>
+      <div><button type="button" class="btn ghost" data-act="vendor-add">+ 업체 추가</button></div></div>`;
   }
   if(type==='textarea') input = `<textarea id="${id}"${ph}>${esc(v)}</textarea>`;
   else if(type==='date') input = `<input type="date" id="${id}" value="${esc(v)}">`;
@@ -424,6 +446,13 @@ function renderEdit(){
     inp.value = n===''?'':won(n); const p = Math.max(0,inp.value.length-pos); inp.setSelectionRange(p,p); updateAuto();
   }));
   frm.addEventListener('change',updateAuto);
+  frm.addEventListener('click',e=>{
+    const add = e.target.closest('[data-act="vendor-add"]');
+    if(add){ const box = frm.querySelector('#f_contractor'); box.insertAdjacentHTML('beforeend', vendorRowHTML()); box.lastElementChild.querySelector('input').focus(); return; }
+    const del = e.target.closest('[data-act="vendor-del"]');
+    if(del){ const box = frm.querySelector('#f_contractor'); const row = del.closest('.vendor-row');
+      if(box.children.length>1) row.remove(); else row.querySelectorAll('input').forEach(i=>i.value=''); }
+  });
   function updateAuto(){
     const tot = COSTS.reduce((a,[ck])=>a+(Number(parseNum(frm.querySelector('#c_'+ck+'_amt').value))||0),0);
     frm.querySelector('#cost-total').textContent = won(tot);
@@ -442,6 +471,14 @@ function renderEdit(){
       if(type==='select') data[key] = (frm.querySelector(`[name="f_${key}"]:checked`)?.value) ?? (frm.querySelector('#f_'+key)?.value||'');
       else if(type==='multi') data[key] = [...frm.querySelectorAll(`[name="f_${key}"]:checked`)].map(x=>x.value);
       else if(type==='money') data[key] = parseNum(frm.querySelector('#f_'+key).value);
+      else if(type==='vendors'){
+        data.contractors = [...frm.querySelectorAll('#f_'+key+' .vendor-row')].map(r=>({
+          name:r.querySelector('[data-v="name"]').value.trim(),
+          worker:r.querySelector('[data-v="worker"]').value.trim(),
+          phone:r.querySelector('[data-v="phone"]').value.trim()
+        })).filter(v=>v.name||v.worker||v.phone);
+        data[key] = data.contractors.map(vendorLine).join('; ');   // 검색·CSV·예전 화면용 글자
+      }
       else data[key] = frm.querySelector('#f_'+key).value.trim();
     }));
     data.costs = {};
