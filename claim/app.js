@@ -33,6 +33,7 @@ const SECTIONS = [
     ['customer','고객명','text'],
     ['phone','고객 연락처','tel'],
     ['address','현장 주소','text',{wide:true}],
+    ['owner','담당자','member'],
     ['receivedAt','클레임 접수일','date'],
     ['channel','접수 경로','multi'],
     ['claimType','클레임 유형','multi',{wide:true}],
@@ -101,7 +102,7 @@ const SECTIONS = [
 /* ---------- 상태 ---------- */
 const S = {
   view:'list', id:null, claims:[], all:[], examples:[], loaded:false, cfg:{},
-  f:{status:'전체', lv:'전체', type:'전체', q:'', mine:false},
+  f:{status:'전체', lv:'전체', type:'전체', q:'', mine:false, myown:false},
   me:{role:null, isAdmin:false, name:''}, members:[], staff:false,
   session:null, authReady:false, email:null, canWrite:true, offline:false,
   photoUrls:{}, confirmDel:false, busy:false, attPending:[], attRemoved:new Set()
@@ -194,6 +195,7 @@ function filtered(){
   const q = S.f.q.trim().toLowerCase();
   return S.claims.filter(c=>{
     if(S.f.mine && !needsMe(c)) return false;
+    if(S.f.myown && !(c.owner===S.email && statusOf(c)!=='종결')) return false;
     if(S.f.status!=='전체' && statusOf(c)!==S.f.status) return false;
     if(S.f.lv!=='전체' && levelOf(c)?.short!==S.f.lv) return false;
     if(S.f.type!=='전체' && !toArr(c.claimType).includes(S.f.type)) return false;
@@ -226,7 +228,7 @@ function renderList(){
       const lv=levelOf(c), st=statusOf(c), el=elapsed(c);
       return `<tr data-open="${esc(c._id)}" tabindex="0">
         <td class="mono">${esc(c.docNo||'—')}</td>
-        <td class="cust"><b>${esc(c.customer||'(고객명 미입력)')}${c.source==='고객 접수'?' <span class="pill ex">고객 신청</span>':''}</b><span>${esc(c.address||'')}</span></td>
+        <td class="cust"><b>${esc(c.customer||'(고객명 미입력)')}${c.source==='고객 접수'?' <span class="pill ex">고객 신청</span>':''}</b><span>${c.owner?'담당 '+esc(memberName(c.owner))+' · ':(c.source==='고객 접수'&&statusOf(c)!=='종결'?'<b class="need-owner">담당자 지정 필요</b> · ':'')}${esc(c.address||'')}</span></td>
         <td data-c="hide" class="num">${esc(c.receivedAt||'')}</td>
         <td data-c="hide">${esc(joinV(c.claimType))}</td>
         <td>${lvPill(lv)}</td>
@@ -247,6 +249,7 @@ function renderList(){
     </div>
     ${S.examples.length?`<div class="ex-strip"><div class="ex-top"><span class="ex-label">작성 예시</span><span class="ex-hint">처음 쓰는 분은 예시를 먼저 열어 보세요. 합계와 대장에는 포함되지 않습니다.</span></div><div class="ex-cards">${S.examples.map(e=>`<button class="ex-card" data-open="${esc(e._id)}"><b>${esc(joinV(e.claimType)||'예시')} · ${esc(joinV(e.process))}</b><span>${esc((e.summary||'').slice(0,48))}${(e.summary||'').length>48?'…':''}</span></button>`).join('')}</div></div>`:''}
     <div class="filters">
+      <button type="button" class="btn ${S.f.myown?'primary':''}" data-act="myown" aria-pressed="${S.f.myown}">내 담당 ${S.claims.filter(c=>c.owner===S.email&&statusOf(c)!=='종결').length}건</button>
       ${S.me.role?`<button type="button" class="btn ${S.f.mine?'primary':''}" data-act="mine" aria-pressed="${S.f.mine}">내 결재 대기 ${S.claims.filter(needsMe).length}건</button>`:''}
       <span><span class="flabel">처리 상태</span>${segHTML('status',['전체','접수','처리중','종결'],S.f.status)}</span>
       <span><span class="flabel">처리 단계</span>${segHTML('lv',['전체',...LEVELS.map(l=>l.short)],S.f.lv)}</span>
@@ -264,7 +267,8 @@ function renderList(){
     tr.addEventListener('keydown',e=>{ if(e.key==='Enter') go('doc',tr.dataset.open); });
   });
   app.querySelector('[data-act="new"]')?.addEventListener('click',()=>go('edit'));
-  app.querySelector('[data-act="reset"]')?.addEventListener('click',()=>{ S.f={status:'전체',lv:'전체',type:'전체',q:'',mine:false}; renderList(); });
+  app.querySelector('[data-act="reset"]')?.addEventListener('click',()=>{ S.f={status:'전체',lv:'전체',type:'전체',q:'',mine:false,myown:false}; renderList(); });
+  app.querySelector('[data-act="myown"]')?.addEventListener('click',()=>{ S.f.myown=!S.f.myown; renderList(); });
   app.querySelector('[data-act="mine"]')?.addEventListener('click',()=>{ S.f.mine=!S.f.mine; renderList(); });
   app.querySelector('[data-act="csv"]')?.addEventListener('click',()=>exportCSV(rows));
 }
@@ -285,6 +289,7 @@ function valHTML(c,key,type){
   else if(type==='datetime') v = fmtDate(v);
   else if(type==='multi') v = joinV(v);
   else if(type==='level') v = levelOf(c)?.label || '';
+  else if(type==='member') v = v ? memberName(v) : '';
   else if(type==='vendors') v = vendorsOf(c).map(vendorLine).filter(Boolean).join('\n');
   else if(type==='attach'){
     const list = Array.isArray(c.attachments) ? c.attachments : [];
@@ -543,6 +548,11 @@ function fieldHTML(c,[key,label,type,o]){
   if(type==='textarea') input = `<textarea id="${id}"${ph}>${esc(v)}</textarea>`;
   else if(type==='date') input = `<input type="date" id="${id}" value="${esc(v)}">`;
   else if(type==='datetime') input = `<input type="datetime-local" id="${id}" value="${esc(v)}">`;
+  else if(type==='member'){
+    const staff = S.members.filter(m=>m.status==='재직').sort((a,b)=>(a.dept||'').localeCompare(b.dept||'') || a.name.localeCompare(b.name));
+    const cur = v || (S.id ? '' : S.email || '');
+    input = `<select id="${id}"><option value="">미지정</option>${staff.map(m=>`<option value="${esc(m.email)}" ${m.email===cur?'selected':''}>${esc(m.name)}${m.dept?' · '+esc(m.dept):''}${m.role?' ('+esc(m.role)+')':''}</option>`).join('')}</select>`;
+  }
   else if(type==='tel') input = `<input type="tel" id="${id}" value="${esc(v)}" placeholder="010-0000-0000" inputmode="tel">`;
   else if(type==='money') input = `<input type="text" inputmode="numeric" id="${id}" value="${esc(won(v))}" data-money style="text-align:right">`;
   else input = `<input type="text" id="${id}" value="${esc(v)}"${ph}>`;
