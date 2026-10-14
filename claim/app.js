@@ -226,7 +226,7 @@ function renderList(){
       const lv=levelOf(c), st=statusOf(c), el=elapsed(c);
       return `<tr data-open="${esc(c._id)}" tabindex="0">
         <td class="mono">${esc(c.docNo||'—')}</td>
-        <td class="cust"><b>${esc(c.customer||'(고객명 미입력)')}</b><span>${esc(c.address||'')}</span></td>
+        <td class="cust"><b>${esc(c.customer||'(고객명 미입력)')}${c.source==='고객 접수'?' <span class="pill ex">고객 신청</span>':''}</b><span>${esc(c.address||'')}</span></td>
         <td data-c="hide" class="num">${esc(c.receivedAt||'')}</td>
         <td data-c="hide">${esc(joinV(c.claimType))}</td>
         <td>${lvPill(lv)}</td>
@@ -408,7 +408,7 @@ async function renderDoc(){
         <div>
           <h1 class="doc-title">클레임 보고서</h1>
           <div class="doc-meta">
-            ${c.example?'<span class="pill ex">작성 예시</span>':''}<span class="mono">${esc(c.docNo||'')}</span>
+            ${c.example?'<span class="pill ex">작성 예시</span>':''}<span class="mono">${esc(c.docNo||'')}</span>${c.source==='고객 접수'?'<span class="pill ex">고객 신청 (카카오톡)</span>':''}
             ${lvPill(lv)}
             <span class="pill st-${st}">${st}</span>
             ${c.reportType?`<span style="color:var(--ink-3);font-size:12px">${esc(c.reportType)}</span>`:''}
