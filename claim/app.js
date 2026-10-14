@@ -138,7 +138,7 @@ function nextDocNo(){
 
 /* ---------- 화면 전환 ---------- */
 function go(view,id){ S.view=view; S.id=id||null; S.confirmDel=false; render(); window.scrollTo(0,0); }
-document.querySelectorAll('.tab[data-view]').forEach(b=>b.addEventListener('click',()=>go(b.dataset.view)));
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>go(b.dataset.view)));
 document.getElementById('btn-new').addEventListener('click',()=>go('edit'));
 
 function render(){
@@ -146,7 +146,7 @@ function render(){
   document.getElementById('who').hidden = !S.session;
   if(!S.session){ renderLogin(); return; }
   if(S.loaded && !S.staff){ document.getElementById('nav').hidden = true; document.getElementById('btn-new').hidden = true; renderBlocked(); return; }
-  document.querySelectorAll('.tab[data-view]').forEach(b=>b.setAttribute('aria-current', String(b.dataset.view===S.view || (b.dataset.view==='list' && (S.view==='doc'||S.view==='edit')))));
+  document.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-current', String(b.dataset.view===S.view || (b.dataset.view==='list' && (S.view==='doc'||S.view==='edit')))));
   document.getElementById('btn-new').hidden = !S.canWrite || !S.session;
   document.getElementById('tab-admin').hidden = !S.me.isAdmin;
   if(S.view==='admin' && !S.me.isAdmin) S.view='list';
