@@ -35,13 +35,13 @@ const SECTIONS = [
     ['periodStart','공사 시작일','date'],
     ['periodEnd','공사 종료일','date'],
     ['receivedAt','클레임 접수일','date'],
-    ['channel','접수 경로','select'],
-    ['claimType','클레임 유형','select',{wide:true}],
+    ['channel','접수 경로','multi'],
+    ['claimType','클레임 유형','multi',{wide:true}],
     ['severity','중요도','select',{wide:true}]
   ]},
   {no:'1', title:'사고 개요 및 상세 경위', guide:'사실 중심의 발생 상황을 육하원칙에 따라 기재해 주세요.', fields:[
     ['occurredAt','발생일시','datetime'],
-    ['process','발생 공정','select',{wide:true}],
+    ['process','발생 공정','multi',{wide:true}],
     ['contractor','시공 업체','text',{ph:'(업체명) / (시공자) / (전화번호)',wide:true}],
     ['summary','주요 사고내용','textarea',{wide:true}],
     ['schedFinish','기존일정 (마감)','date'],
@@ -53,7 +53,7 @@ const SECTIONS = [
     ['after','이후 대응 과정','textarea',{wide:true}]
   ]},
   {no:'2', title:'사고 원인 분석', guide:'직접적 원인과 더불어 시스템적 근본 원인을 분석해 주세요.', fields:[
-    ['causeType','원인 구분','select',{wide:true}],
+    ['causeType','원인 구분','multi',{wide:true}],
     ['responsibility','책임 소재','text',{wide:true}],
     ['cause','사고 원인','textarea',{wide:true}]
   ]},
@@ -61,7 +61,7 @@ const SECTIONS = [
     ['damage','고객 피해내용','textarea',{wide:true}]
   ]},
   {no:'4', title:'대응 조치 및 결과', guide:'클레임 해결을 위해 취한 조치와 현재 상태를 기재해 주세요.', fields:[
-    ['action','처리 방안','select',{wide:true}],
+    ['action','처리 방안','multi',{wide:true}],
     ['actionOwner','조치 담당','text'],
     ['dueDate','완료 예정일','date'],
     ['done','대응 완료 사항','textarea',{wide:true}],
@@ -69,7 +69,7 @@ const SECTIONS = [
     ['negotiation','고객 협의 결과','textarea',{wide:true}]
   ]},
   {no:'5', title:'비용 및 손실 산정', guide:'발생 비용을 항목별로 기재해 주세요. 합계는 자동 계산됩니다. (예: 욕실 방수 재시공 1,500,000)', costs:true, fields:[
-    ['costBearer','비용 부담 주체','select'],
+    ['costBearer','비용 부담 주체','multi'],
     ['shareRatio','분담 비율','text',{ph:'자사 OO% / 협력업체 OO% / 고객 OO%'}]
   ]},
   {no:'6', title:'재발 방지 대책', guide:'공유 대상은 해당하는 곳을 모두 고르세요.', fields:[
@@ -105,7 +105,10 @@ const parseNum = v => { const n = Number(String(v??'').replace(/[^\d.-]/g,'')); 
 const todayStr = () => { const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
 const sevKey = s => (s||'').charAt(0);
 const costTotal = c => COSTS.reduce((a,[k]) => a + (Number(c?.costs?.[k]?.amt)||0), 0);
-const statusOf = c => c.closed==='종결' ? '종결' : (c.action ? '처리중' : '접수');
+// 여러 개 고를 수 있는 항목: 예전 보고서는 문자열 하나, 새 보고서는 배열
+const toArr = v => Array.isArray(v) ? v.filter(Boolean) : (v ? [v] : []);
+const joinV = v => toArr(v).join(', ');
+const statusOf = c => c.closed==='종결' ? '종결' : (toArr(c.action).length ? '처리중' : '접수');
 function elapsed(c){
   if(!c.receivedAt) return '';
   const start = new Date(c.receivedAt+'T00:00:00');
@@ -175,7 +178,7 @@ function filtered(){
     if(S.f.mine && !needsMe(c)) return false;
     if(S.f.status!=='전체' && statusOf(c)!==S.f.status) return false;
     if(S.f.sev!=='전체' && sevKey(c.severity)!==S.f.sev) return false;
-    if(S.f.type!=='전체' && c.claimType!==S.f.type) return false;
+    if(S.f.type!=='전체' && !toArr(c.claimType).includes(S.f.type)) return false;
     if(q){
       const hay = [c.docNo,c.customer,c.address,c.author,c.summary,c.contractor,c.contractNo].join(' ').toLowerCase();
       if(!hay.includes(q)) return false;
@@ -207,9 +210,9 @@ function renderList(){
         <td class="mono">${esc(c.docNo||'—')}</td>
         <td class="cust"><b>${esc(c.customer||'(고객명 미입력)')}</b><span>${esc(c.address||'')}</span></td>
         <td data-c="hide" class="num">${esc(c.receivedAt||'')}</td>
-        <td data-c="hide">${esc(c.claimType||'')}</td>
+        <td data-c="hide">${esc(joinV(c.claimType))}</td>
         <td>${k?`<span class="pill sev-${k}">${esc(c.severity)}</span>`:''}</td>
-        <td data-c="hide">${esc(c.action||'')}</td>
+        <td data-c="hide">${esc(joinV(c.action))}</td>
         <td class="num" data-c="hide">${costTotal(c)?won(costTotal(c)):''}</td>
         <td><span class="pill st-${st}">${st}</span></td>
         <td class="num ${st!=='종결'&&el>=14?'over':''}">${el===''?'':el+'일'}</td>
@@ -224,7 +227,7 @@ function renderList(){
       <div class="kpi"><small>계약금액 합계</small><strong>${won(sumContract)}<em>원</em></strong></div>
       <div class="kpi"><small>비용 합계</small><strong>${won(sumCost)}<em>원</em></strong></div>
     </div>
-    ${S.examples.length?`<div class="ex-strip"><div class="ex-top"><span class="ex-label">작성 예시</span><span class="ex-hint">처음 쓰는 분은 예시를 먼저 열어 보세요. 합계와 대장에는 포함되지 않습니다.</span></div><div class="ex-cards">${S.examples.map(e=>`<button class="ex-card" data-open="${esc(e._id)}"><b>${esc(e.claimType||'예시')} · ${esc(e.process||'')}</b><span>${esc((e.summary||'').slice(0,48))}${(e.summary||'').length>48?'…':''}</span></button>`).join('')}</div></div>`:''}
+    ${S.examples.length?`<div class="ex-strip"><div class="ex-top"><span class="ex-label">작성 예시</span><span class="ex-hint">처음 쓰는 분은 예시를 먼저 열어 보세요. 합계와 대장에는 포함되지 않습니다.</span></div><div class="ex-cards">${S.examples.map(e=>`<button class="ex-card" data-open="${esc(e._id)}"><b>${esc(joinV(e.claimType)||'예시')} · ${esc(joinV(e.process))}</b><span>${esc((e.summary||'').slice(0,48))}${(e.summary||'').length>48?'…':''}</span></button>`).join('')}</div></div>`:''}
     <div class="filters">
       ${S.me.role?`<button type="button" class="btn ${S.f.mine?'primary':''}" data-act="mine" aria-pressed="${S.f.mine}">내 결재 대기 ${S.claims.filter(needsMe).length}건</button>`:''}
       <span><span class="flabel">처리 상태</span>${segHTML('status',['전체','접수','처리중','종결'],S.f.status)}</span>
@@ -251,7 +254,7 @@ function renderList(){
 function exportCSV(rows){
   const head = ['No','문서번호','작성일자','작성자','보고 구분','고객명','현장 주소','계약번호','계약금액(원)','공사 시작일','공사 종료일','접수일','접수 경로','클레임 유형','중요도','결재 범위','발생일시','발생 공정','시공 업체','주요 사고내용','원인 구분','책임 소재','처리 방안','조치 담당','완료 예정일','비용 합계(원)','비용 부담 주체','최종 처리일','고객 만족도','종결 여부','처리 상태','경과일'];
   const q = v => { const s=String(v??''); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
-  const lines = [head.join(',')].concat(rows.map((c,i)=>[i+1,c.docNo,c.createdAt,c.author,c.reportType,c.customer,c.address,c.contractNo,c.contractAmount,c.periodStart,c.periodEnd,c.receivedAt,c.channel,c.claimType,c.severity,routeOf(sevKey(c.severity)),fmtDate(c.occurredAt),c.process,c.contractor,c.summary,c.causeType,c.responsibility,c.action,c.actionOwner,c.dueDate,costTotal(c)||'',c.costBearer,c.finalDate,c.satisfaction,c.closed,statusOf(c),elapsed(c)].map(q).join(',')));
+  const lines = [head.join(',')].concat(rows.map((c,i)=>[i+1,c.docNo,c.createdAt,c.author,c.reportType,c.customer,c.address,c.contractNo,c.contractAmount,c.periodStart,c.periodEnd,c.receivedAt,joinV(c.channel),joinV(c.claimType),c.severity,routeOf(sevKey(c.severity)),fmtDate(c.occurredAt),joinV(c.process),c.contractor,c.summary,joinV(c.causeType),c.responsibility,joinV(c.action),c.actionOwner,c.dueDate,costTotal(c)||'',joinV(c.costBearer),c.finalDate,c.satisfaction,c.closed,statusOf(c),elapsed(c)].map(q).join(',')));
   const blob = new Blob(['\ufeff'+lines.join('\r\n')], {type:'text/csv;charset=utf-8'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `클레임_관리대장_${todayStr()}.csv`;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
@@ -262,7 +265,7 @@ function valHTML(c,key,type){
   let v = c[key];
   if(type==='money') v = v!==''&&v!=null ? won(v)+' 원' : '';
   else if(type==='datetime') v = fmtDate(v);
-  else if(type==='multi') v = Array.isArray(v)?v.join(', '):(v||'');
+  else if(type==='multi') v = joinV(v);
   return v ? `<dd>${esc(v)}</dd>` : `<dd class="blank">—</dd>`;
 }
 async function renderDoc(){
@@ -384,9 +387,9 @@ function fieldHTML(c,[key,label,type,o]){
     return `<div class="fld${wide}"><span class="lbl">${esc(label)}</span>${input}</div>`;
   }
   if(type==='multi'){
-    const arr = Array.isArray(v)?v:[];
+    const arr = toArr(v);
     input = `<div class="chips">`+OPT[key].map((op,i)=>`<label class="chip"><input type="checkbox" name="${id}" id="${id}_${i}" value="${esc(op)}" ${arr.includes(op)?'checked':''}><span>${esc(op)}</span></label>`).join('')+`</div>`;
-    return `<div class="fld${wide}"><span class="lbl">${esc(label)}</span>${input}</div>`;
+    return `<div class="fld${wide}"><span class="lbl">${esc(label)} <span class="guide" style="font-weight:400">· 여러 개 선택 가능</span></span>${input}</div>`;
   }
   if(type==='textarea') input = `<textarea id="${id}"${ph}>${esc(v)}</textarea>`;
   else if(type==='date') input = `<input type="date" id="${id}" value="${esc(v)}">`;
