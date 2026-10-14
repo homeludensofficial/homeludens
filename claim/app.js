@@ -11,14 +11,20 @@ const OPT = {
   closed:['종결','추가 조치 필요'],
   shareTargets:['영업팀','시공팀','협력업체','전사']
 };
-const ROLES = ['팀원 (작성)','팀장','본부장','부대표','대표'];
+// 결재란 칸. 부대표·대표는 한 칸으로 묶는다(2026-10-15 대표 지시) — 둘 중 한 명이 결재하면 된다.
+// 칸 열쇠는 '대표', 화면 이름은 '대표·부대표'. 예전 보고서의 '부대표' 결재도 이 칸에 보인다.
+const ROLES = ['팀원 (작성)','팀장','본부장','대표'];
+const roleLabel = r => r==='대표' ? '대표·부대표' : r;
+/** 직급에서 나온 역할 → 결재란 칸 열쇠 (부대표는 대표 칸) */
+const apKey = r => r==='부대표' ? '대표' : r;
+const apOf = (ap, r) => ap?.[r]?.date ? ap[r] : (r==='대표' && ap?.['부대표']?.date ? ap['부대표'] : null);
 // 처리 단계: 담당자가 못 풀면 팀장 → 본부장 → 대표·부대표로 올라간다.
-// 결재는 지금 처리하는 사람의 한 단계 위까지 (steps = 결재란 칸 수, 작성 칸 포함)
+// 결재는 지금 처리하는 사람의 한 단계 위까지, 대표·부대표가 맨 위 (steps = 결재란 칸 수, 작성 칸 포함)
 const LEVELS = [
   {key:'담당자', label:'담당자 처리',    short:'담당자',     when:'현장 담당자 선에서 해결하는 클레임',              steps:2},
   {key:'팀장',   label:'팀장 개입',      short:'팀장',       when:'담당자가 해결하지 못해 팀장이 직접 대응',          steps:3},
   {key:'본부장', label:'본부장 개입',    short:'본부장',     when:'팀장 선에서 해결되지 않아 본부장이 대응',          steps:4},
-  {key:'대표',   label:'대표·부대표 개입', short:'대표·부대표', when:'본부장 선에서도 해결되지 않아 경영진이 직접 대응', steps:5}
+  {key:'대표',   label:'대표·부대표 개입', short:'대표·부대표', when:'본부장 선에서도 해결되지 않아 경영진이 직접 대응', steps:4}
 ];
 const LV = Object.fromEntries(LEVELS.map((l,i)=>[l.key, Object.assign({i}, l)]));
 // 예전 보고서(중요도 S/A/B)는 결재 칸 수가 같은 단계로 읽는다
@@ -145,7 +151,8 @@ function elapsed(c){
 }
 function fmtDate(s){ if(!s) return ''; return String(s).replace('T',' '); }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true,2600); }
-const routeOf = lv => lv ? ROLES.slice(0, lv.steps).map(r=>r.replace(' (작성)','')).join(' → ') : '';
+/** 결재받을 사람 (작성자 빼고, 결재란 왼쪽부터) */
+const routeOf = lv => lv ? ROLES.slice(1, lv.steps).map(roleLabel).join(' → ') : '';
 const lvPill = lv => lv ? `<span class="pill lv-${lv.i}">${esc(lv.label)}</span>` : '';
 function nextDocNo(){
   const y = new Date().getFullYear();
@@ -187,9 +194,9 @@ function roleOfTitle(t){
 }
 function memberName(email){ const m = S.members.find(x=>x.email===String(email||'').toLowerCase()); return m?.name || String(email||'').split('@')[0]; }
 function needsMe(c){
-  const r = S.me.role; if(!r) return false;
+  const r = apKey(S.me.role); if(!r) return false;
   const steps = levelOf(c)?.steps || 0;
-  return ROLES.indexOf(r) > 0 && ROLES.indexOf(r) < steps && !c.approvals?.[r]?.date;
+  return ROLES.indexOf(r) > 0 && ROLES.indexOf(r) < steps && !apOf(c.approvals, r);
 }
 function filtered(){
   const q = S.f.q.trim().toLowerCase();
@@ -274,7 +281,7 @@ function renderList(){
 }
 
 function exportCSV(rows){
-  const head = ['No','문서번호','작성일자','작성자','고객명','고객 연락처','현장 주소','계약번호','계약금액(원)','공사 시작일','공사 종료일','접수일','접수 경로','클레임 유형','처리 단계','결재 범위','발생일시','발생 공정','시공 업체','주요 사고내용','원인 구분','책임 소재','처리 방안','조치 담당','완료 예정일','비용 산정(원)','지급 완료(원)','지급 예정(원)','비용 부담 주체','최종 처리일','고객 만족도','종결 여부','처리 상태','경과일'];
+  const head = ['No','문서번호','작성일자','작성자','고객명','고객 연락처','현장 주소','계약번호','계약금액(원)','공사 시작일','공사 종료일','접수일','접수 경로','클레임 유형','처리 단계','결재','발생일시','발생 공정','시공 업체','주요 사고내용','원인 구분','책임 소재','처리 방안','조치 담당','완료 예정일','비용 산정(원)','지급 완료(원)','지급 예정(원)','비용 부담 주체','최종 처리일','고객 만족도','종결 여부','처리 상태','경과일'];
   const q = v => { const s=String(v??''); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
   const lines = [head.join(',')].concat(rows.map((c,i)=>[i+1,c.docNo,c.createdAt,c.author,c.customer,c.phone,c.address,c.contractNo,c.contractAmount,c.periodStart,c.periodEnd,c.receivedAt,joinV(c.channel),joinV(c.claimType),levelOf(c)?.label||'',routeOf(levelOf(c)),fmtDate(c.occurredAt),joinV(c.process),c.contractor,c.summary,joinV(c.causeType),c.responsibility,joinV(c.action),c.actionOwner,c.dueDate,costTotal(c)||'',paidSum(c,'지급 완료')||'',paidSum(c,'예정')||'',joinV(c.costBearer),c.finalDate,c.satisfaction,c.closed,statusOf(c),elapsed(c)].map(q).join(',')));
   const blob = new Blob(['\ufeff'+lines.join('\r\n')], {type:'text/csv;charset=utf-8'});
@@ -314,7 +321,7 @@ function escalationHTML(c, lv, canW){
   const next = LEVELS[cur+1];
   const open = S.escOpen === c._id;
   return `<section class="esc">
-    <div class="esc-head"><h2>처리 단계</h2><span class="guide">해결이 안 되면 다음 단계로 올립니다. 올리면 결재 범위도 한 칸 늘어납니다.</span></div>
+    <div class="esc-head"><h2>처리 단계</h2><span class="guide">해결이 안 되면 다음 단계로 올립니다. 올리면 결재받을 사람이 한 명 늘어납니다.</span></div>
     <ol class="esc-steps">${LEVELS.map((l,i)=>`<li class="${i<cur?'done':i===cur?'cur':''}"><b>${esc(l.short)}</b><span>${i===cur?'지금 단계':i<cur?'거침':''}</span></li>`).join('')}</ol>
     ${log.length?`<ul class="esc-log">${log.map((e,k)=>{
       const open = S.kakaoOpen===c._id+':'+k;
@@ -346,7 +353,7 @@ function kakaoText(c, e){
     `올린 사람: ${e.by?memberName(e.by):'-'} (${e.date||''})`,
     ``,
     `비용 산정 ${won(costTotal(c))||0}원 / 지급 완료 ${won(paidSum(c,'지급 완료'))||0}원`,
-    `결재 범위: ${to?routeOf(to):''}`,
+    `결재: ${to?routeOf(to):''}`,
     `${to?to.short:''}님 확인 부탁드립니다.`,
     ``,
     `보고서: ${claimLink(c)}`
@@ -385,8 +392,8 @@ async function renderDoc(){
   const apCells = ROLES.map((r,i)=>{
     if(i===0) return `<td><div class="stamp-btn" style="cursor:default"><span class="stamp">작성</span><span class="stamp-date">${esc(c.createdAt||'')}</span></div></td>`;
     if(!steps || i>=steps) return `<td class="off"><span>${steps?'해당 없음':'단계 선택'}</span></td>`;
-    const a = ap[r];
-    const mine = canW && (S.me.role===r || S.me.isAdmin);
+    const a = apOf(ap, r);
+    const mine = canW && (apKey(S.me.role)===r || S.me.isAdmin);
     if(a?.date){
       const nm = a.by ? memberName(a.by) : '';
       const inner = `<span class="stamp">${esc(r.slice(0,2))}</span><span class="stamp-date">${esc(a.date.slice(5).replace('-','/'))}${nm?' '+esc(nm):''}</span>`;
@@ -420,8 +427,8 @@ async function renderDoc(){
           </div>
         </div>
         <div style="overflow-x:auto;max-width:100%">
-          <table class="approve"><tr>${ROLES.map(r=>`<th>${esc(r)}</th>`).join('')}</tr><tr>${apCells}</tr></table>
-          <div class="approve-route">${steps?'결재 범위: '+esc(routeOf(lv)):'처리 단계를 고르면 결재 범위가 정해집니다'}</div>
+          <table class="approve"><tr>${ROLES.map(r=>`<th>${esc(roleLabel(r))}</th>`).join('')}</tr><tr>${apCells}</tr></table>
+          <div class="approve-route">${steps?'결재: '+esc(routeOf(lv)):'처리 단계를 고르면 결재받을 사람이 정해집니다'}</div>
         </div>
       </div>
       ${escalationHTML(c, lv, canW)}
@@ -453,8 +460,9 @@ async function renderDoc(){
   });
   app.querySelectorAll('[data-stamp]').forEach(b=>b.addEventListener('click',async()=>{
     const r = b.dataset.stamp; const next = Object.assign({}, c.approvals||{});
-    if(next[r]?.date) delete next[r]; else next[r] = {date:todayStr(), by:S.email||null};
-    await patch(c._id,{approvals:next}, next[r]?`${r} 결재를 기록했습니다.`:`${r} 결재를 취소했습니다.`);
+    const had = apOf(next, r);
+    if(had){ delete next[r]; if(r==='대표') delete next['부대표']; } else next[r] = {date:todayStr(), by:S.email||null};
+    await patch(c._id,{approvals:next}, had?`${roleLabel(r)} 결재를 취소했습니다.`:`${roleLabel(r)} 결재를 기록했습니다.`);
   }));
   app.querySelectorAll('[data-rmphoto]').forEach(b=>b.addEventListener('click',async e=>{
     e.preventDefault();
@@ -621,7 +629,7 @@ function renderEdit(){
     const done = pays.filter(p=>p.st==='지급 완료').reduce((a,p)=>a+p.amt,0), plan = pays.filter(p=>p.st!=='지급 완료').reduce((a,p)=>a+p.amt,0);
     frm.querySelector('#pay-sum').textContent = pays.length ? `지급 완료 ${won(done)}원 · 예정 ${won(plan)}원` : '아직 지급 내역이 없습니다';
     const lv = LV[frm.querySelector('input[name="f_level"]:checked')?.value || ''];
-    frm.querySelector('#lv-auto').innerHTML = lv ? `결재 범위 (자동): <b>${esc(routeOf(lv))}</b><br><span style="color:var(--ink-3)">${esc(lv.when)}</span>` : '처리 단계를 고르면 결재 범위가 자동으로 표시됩니다.';
+    frm.querySelector('#lv-auto').innerHTML = lv ? `결재받을 사람 (자동): <b>${esc(routeOf(lv))}</b><br><span style="color:var(--ink-3)">${esc(lv.when)}</span>` : '처리 단계를 고르면 결재받을 사람이 자동으로 표시됩니다.';
   }
   updateAuto();
   frm.addEventListener('submit',async e=>{
@@ -693,11 +701,12 @@ function renderEdit(){
 function renderStd(){
   app.innerHTML = `
     <h1 class="page">처리 기준</h1>
-    <p class="sub">클레임은 담당자가 먼저 대응하고, 해결되지 않으면 팀장 → 본부장 → 대표·부대표 순서로 올라갑니다. 결재는 지금 대응하는 사람의 한 단계 위까지 받습니다.</p>
+    <p class="sub">클레임은 담당자가 먼저 대응하고, 해결되지 않으면 팀장 → 본부장 → 대표·부대표 순서로 올라갑니다. 단계가 하나 올라갈 때마다 결재받을 사람이 한 명씩 늘어납니다.</p>
     <section class="form-sec">
-      <h2>단계별 결재 범위</h2>
-      <div style="overflow-x:auto"><table class="std"><thead><tr><th>처리 단계</th><th>언제</th><th>결재 범위</th><th class="num">결재 칸</th></tr></thead><tbody>
-        ${LEVELS.map((l,i)=>`<tr><td>${lvPill(LV[l.key])}</td><td>${esc(l.when)}</td><td>${esc(routeOf(l))}</td><td class="num">${l.steps-1}명</td></tr>`).join('')}
+      <h2>단계별로 누가 결재하나요</h2>
+      <p class="guide">✓ 표시한 사람이 결재합니다. 작성자(팀원)는 결재하지 않습니다. 대표·부대표 칸은 두 분 중 한 분이 결재하면 됩니다.</p>
+      <div style="overflow-x:auto"><table class="std matrix"><thead><tr><th>처리 단계</th><th>언제</th>${ROLES.slice(1).map(r=>`<th class="c">${esc(roleLabel(r))}</th>`).join('')}</tr></thead><tbody>
+        ${LEVELS.map(l=>`<tr><td>${lvPill(LV[l.key])}</td><td>${esc(l.when)}</td>${ROLES.slice(1).map((r,j)=>`<td class="c">${j+1<l.steps?'<b>✓</b>':'<span class="guide">—</span>'}</td>`).join('')}</tr>`).join('')}
       </tbody></table></div>
     </section>
     <section class="form-sec">
