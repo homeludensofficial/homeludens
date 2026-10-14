@@ -1,10 +1,8 @@
 (function(){
 /* ---------- 목록 정의 (엑셀 Data 시트) ---------- */
 const OPT = {
-  severity:['S (긴급)','A (높음)','B (보통)'],
   claimType:['감성형','현장성_경미','현장성_누수','현장성_화재','현장성_담배','현장성_기타','외부_건물설비','외부_관리사무소','외부_기타'],
   channel:['전화','방문','카카오톡','온라인','기타'],
-  reportType:['최초 보고','중간 보고','종결 보고'],
   process:['철거','설비','목공','전기','타일','도장','도배','가구','마감','기타'],
   causeType:['시공팀','협력업체','자재','설계/견적','영업 설명 부족','고객 요인','기타'],
   action:['재시공','부분 보수','자재 교체','금액 보상','설명 및 협의','기타'],
@@ -14,39 +12,50 @@ const OPT = {
   shareTargets:['영업팀','시공팀','협력업체','전사']
 };
 const ROLES = ['팀원 (작성)','팀장','본부장','부대표','대표'];
-const STD = {
-  S:{grade:'중대', steps:5},
-  A:{grade:'보통', steps:4},
-  B:{grade:'경미', steps:3}
-};
+// 처리 단계: 담당자가 못 풀면 팀장 → 본부장 → 대표·부대표로 올라간다.
+// 결재는 지금 처리하는 사람의 한 단계 위까지 (steps = 결재란 칸 수, 작성 칸 포함)
+const LEVELS = [
+  {key:'담당자', label:'담당자 처리',    short:'담당자',     when:'현장 담당자 선에서 해결하는 클레임',              steps:2},
+  {key:'팀장',   label:'팀장 개입',      short:'팀장',       when:'담당자가 해결하지 못해 팀장이 직접 대응',          steps:3},
+  {key:'본부장', label:'본부장 개입',    short:'본부장',     when:'팀장 선에서 해결되지 않아 본부장이 대응',          steps:4},
+  {key:'대표',   label:'대표·부대표 개입', short:'대표·부대표', when:'본부장 선에서도 해결되지 않아 경영진이 직접 대응', steps:5}
+];
+const LV = Object.fromEntries(LEVELS.map((l,i)=>[l.key, Object.assign({i}, l)]));
+// 예전 보고서(중요도 S/A/B)는 결재 칸 수가 같은 단계로 읽는다
+const OLD_SEV = {S:'대표', A:'본부장', B:'팀장'};
+const levelOf = c => LV[c.level] || LV[OLD_SEV[String(c.severity||'').charAt(0)]] || null;
 const COSTS = [['rework','재시공 / 보수 비용'],['material','자재비'],['comp','보상 (감액 / 환불)'],['etc','기타']];
 
 /* ---------- 보고서 항목 (엑셀 클레임보고서 시트) ---------- */
 const SECTIONS = [
-  {no:'', title:'기본 정보', fields:[
-    ['docNo','문서번호','text',{ph:'비워 두면 자동 부여 (CLM-2026-001)'}],
-    ['createdAt','작성일자','date'],
-    ['author','작성자','text',{ph:'(팀 소속) / (성명)'}],
-    ['reportType','보고 구분','select'],
+  // intake: 전화로 접수할 때 바로 채우는 칸. 나머지는 새 보고서에서 '처리하면서 채울 항목'으로 접힌다.
+  {no:'', title:'접수 정보', intake:true, fields:[
     ['customer','고객명','text'],
-    ['address','현장 주소','text'],
-    ['contractNo','계약번호','text'],
-    ['contractAmount','계약금액 (원)','money'],
-    ['periodStart','공사 시작일','date'],
-    ['periodEnd','공사 종료일','date'],
+    ['phone','고객 연락처','tel'],
+    ['address','현장 주소','text',{wide:true}],
     ['receivedAt','클레임 접수일','date'],
     ['channel','접수 경로','multi'],
     ['claimType','클레임 유형','multi',{wide:true}],
-    ['severity','중요도','select',{wide:true}]
+    ['level','처리 단계','level',{wide:true}]
+  ]},
+  {no:'', title:'고객 접수 내용', intake:true, guide:'고객이 말한 내용을 정리하고, 녹취·카톡 캡처·대화 파일을 함께 올려 두세요.', fields:[
+    ['summary','접수 내용 (주요 사고내용)','textarea',{wide:true}],
+    ['customerRequest','고객 요청사항','textarea',{ph:'예: 데드라인 요구 / 보상 요구 / 태도 기타 등',wide:true}],
+    ['attachments','접수 자료 (녹취·카톡 캡처·파일)','attach',{wide:true}],
+    ['chatLog','카톡·문자 대화 붙여넣기','textarea',{ph:'카톡 대화를 길게 눌러 복사한 뒤 붙여 넣으세요.',wide:true}]
+  ]},
+  {no:'', title:'계약 정보', fields:[
+    ['contractNo','계약번호','text'],
+    ['contractAmount','계약금액 (원)','money'],
+    ['periodStart','공사 시작일','date'],
+    ['periodEnd','공사 종료일','date']
   ]},
   {no:'1', title:'사고 개요 및 상세 경위', guide:'사실 중심의 발생 상황을 육하원칙에 따라 기재해 주세요.', fields:[
     ['occurredAt','발생일시','datetime'],
     ['process','발생 공정','multi',{wide:true}],
     ['contractor','시공 업체','vendors',{wide:true}],
-    ['summary','주요 사고내용','textarea',{wide:true}],
     ['schedFinish','기존일정 (마감)','date'],
     ['schedMoveIn','기존일정 (입주)','date'],
-    ['customerRequest','고객 요청사항','textarea',{ph:'예: 데드라인 요구 / 보상 요구 / 태도 기타 등',wide:true}],
     ['firstAware','최초 인지 경로','textarea',{wide:true}],
     ['before','작업 전 상황','textarea',{wide:true}],
     ['progress','작업 진행 과정','textarea',{wide:true}],
@@ -69,6 +78,7 @@ const SECTIONS = [
     ['negotiation','고객 협의 결과','textarea',{wide:true}]
   ]},
   {no:'5', title:'비용 및 손실 산정', guide:'발생 비용을 항목별로 기재해 주세요. 합계는 자동 계산됩니다. (예: 욕실 방수 재시공 1,500,000)', costs:true, fields:[
+    ['payouts','지급 내역','payouts',{wide:true}],
     ['costBearer','비용 부담 주체','multi'],
     ['shareRatio','분담 비율','text',{ph:'자사 OO% / 협력업체 OO% / 고객 OO%'}]
   ]},
@@ -90,11 +100,11 @@ const SECTIONS = [
 
 /* ---------- 상태 ---------- */
 const S = {
-  view:'list', id:null, claims:[], all:[], examples:[], loaded:false, cfg:{minor:'',major:''},
-  f:{status:'전체', sev:'전체', type:'전체', q:'', mine:false},
+  view:'list', id:null, claims:[], all:[], examples:[], loaded:false, cfg:{},
+  f:{status:'전체', lv:'전체', type:'전체', q:'', mine:false},
   me:{role:null, isAdmin:false, name:''}, members:[], staff:false,
   session:null, authReady:false, email:null, canWrite:true, offline:false,
-  photoUrls:{}, confirmDel:false, busy:false
+  photoUrls:{}, confirmDel:false, busy:false, attPending:[], attRemoved:new Set()
 };
 const app = document.getElementById('app');
 
@@ -103,7 +113,16 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const won = n => (n===''||n==null||isNaN(n)) ? '' : Number(n).toLocaleString('ko-KR');
 const parseNum = v => { const n = Number(String(v??'').replace(/[^\d.-]/g,'')); return isFinite(n)&&String(v??'').trim()!=='' ? n : ''; };
 const todayStr = () => { const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
-const sevKey = s => (s||'').charAt(0);
+const PAY_STATUS = ['예정','지급 완료'];
+const payoutsOf = c => Array.isArray(c.payouts) ? c.payouts : [];
+const paidSum = (c, st) => payoutsOf(c).filter(p=>!st || p.status===st).reduce((a,p)=>a+(Number(p.amt)||0),0);
+const fmtSize = n => !n ? '' : n>=1048576 ? (n/1048576).toFixed(1)+'MB' : Math.max(1,Math.round(n/1024))+'KB';
+const attKind = a => { const t=String(a.type||''), n=String(a.name||'').toLowerCase();
+  if(t.startsWith('audio/') || /\.(m4a|mp3|wav|aac|amr|3gp|ogg)$/.test(n)) return 'audio';
+  if(t.startsWith('image/') || /\.(jpe?g|png|gif|webp|heic)$/.test(n)) return 'image';
+  if(t.startsWith('video/') || /\.(mp4|mov)$/.test(n)) return 'video';
+  return 'file'; };
+const attIcon = a => `<span class="att-tag">${({audio:'녹취', image:'이미지', video:'영상', file:'파일'})[attKind(a)]}</span>`;
 const costTotal = c => COSTS.reduce((a,[k]) => a + (Number(c?.costs?.[k]?.amt)||0), 0);
 // 여러 개 고를 수 있는 항목: 예전 보고서는 문자열 하나, 새 보고서는 배열
 const toArr = v => Array.isArray(v) ? v.filter(Boolean) : (v ? [v] : []);
@@ -125,20 +144,8 @@ function elapsed(c){
 }
 function fmtDate(s){ if(!s) return ''; return String(s).replace('T',' '); }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true,2600); }
-function stdText(k){
-  const mi = S.cfg.minor!=='' && S.cfg.minor!=null ? S.cfg.minor : 'OO';
-  const ma = S.cfg.major!=='' && S.cfg.major!=null ? S.cfg.major : 'OO';
-  if(k==='S') return `보수 비용 ${ma}만 원 이상, 재시공, 법적 분쟁 우려`;
-  if(k==='A') return `보수 비용 ${mi}만 원 이상 ${ma}만 원 미만`;
-  return `보수 비용 ${mi}만 원 미만, 단순 응대·설명`;
-}
-const routeOf = k => STD[k] ? ROLES.slice(0,STD[k].steps).map(r=>r.replace(' (작성)','')).join(' → ') : '';
-function suggestSev(totalWon){
-  const mi = Number(S.cfg.minor), ma = Number(S.cfg.major);
-  if(!totalWon || !S.cfg.minor || !S.cfg.major) return '';
-  const man = totalWon/10000;
-  return man>=ma ? 'S (긴급)' : man>=mi ? 'A (높음)' : 'B (보통)';
-}
+const routeOf = lv => lv ? ROLES.slice(0, lv.steps).map(r=>r.replace(' (작성)','')).join(' → ') : '';
+const lvPill = lv => lv ? `<span class="pill lv-${lv.i}">${esc(lv.label)}</span>` : '';
 function nextDocNo(){
   const y = new Date().getFullYear();
   const re = new RegExp('^CLM-'+y+'-(\\d+)$');
@@ -147,7 +154,11 @@ function nextDocNo(){
 }
 
 /* ---------- 화면 전환 ---------- */
-function go(view,id){ S.view=view; S.id=id||null; S.confirmDel=false; render(); window.scrollTo(0,0); }
+function go(view,id){
+  S.view=view; S.id=id||null; S.confirmDel=false;
+  try{ history.replaceState(null,'', view==='doc'&&id ? '#doc-'+id : location.pathname); }catch(_){}
+  render(); window.scrollTo(0,0);
+}
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>go(b.dataset.view)));
 document.getElementById('btn-new').addEventListener('click',()=>go('edit'));
 
@@ -176,7 +187,7 @@ function roleOfTitle(t){
 function memberName(email){ const m = S.members.find(x=>x.email===String(email||'').toLowerCase()); return m?.name || String(email||'').split('@')[0]; }
 function needsMe(c){
   const r = S.me.role; if(!r) return false;
-  const steps = STD[sevKey(c.severity)]?.steps || 0;
+  const steps = levelOf(c)?.steps || 0;
   return ROLES.indexOf(r) > 0 && ROLES.indexOf(r) < steps && !c.approvals?.[r]?.date;
 }
 function filtered(){
@@ -184,10 +195,10 @@ function filtered(){
   return S.claims.filter(c=>{
     if(S.f.mine && !needsMe(c)) return false;
     if(S.f.status!=='전체' && statusOf(c)!==S.f.status) return false;
-    if(S.f.sev!=='전체' && sevKey(c.severity)!==S.f.sev) return false;
+    if(S.f.lv!=='전체' && levelOf(c)?.short!==S.f.lv) return false;
     if(S.f.type!=='전체' && !toArr(c.claimType).includes(S.f.type)) return false;
     if(q){
-      const hay = [c.docNo,c.customer,c.address,c.author,c.summary,c.contractor,c.contractNo].join(' ').toLowerCase();
+      const hay = [c.docNo,c.customer,c.phone,c.address,c.author,c.summary,c.contractor,c.contractNo].join(' ').toLowerCase();
       if(!hay.includes(q)) return false;
     }
     return true;
@@ -212,13 +223,13 @@ function renderList(){
     body = `<div class="tbl-wrap"><table class="ledger"><thead><tr>
       <th>문서번호</th><th>고객 / 현장</th><th>접수일</th><th>클레임 유형</th><th>중요도</th><th>처리 방안</th><th class="num">비용 합계(원)</th><th>상태</th><th class="num">경과일</th>
     </tr></thead><tbody>`+rows.map(c=>{
-      const k=sevKey(c.severity), st=statusOf(c), el=elapsed(c);
+      const lv=levelOf(c), st=statusOf(c), el=elapsed(c);
       return `<tr data-open="${esc(c._id)}" tabindex="0">
         <td class="mono">${esc(c.docNo||'—')}</td>
         <td class="cust"><b>${esc(c.customer||'(고객명 미입력)')}</b><span>${esc(c.address||'')}</span></td>
         <td data-c="hide" class="num">${esc(c.receivedAt||'')}</td>
         <td data-c="hide">${esc(joinV(c.claimType))}</td>
-        <td>${k?`<span class="pill sev-${k}">${esc(c.severity)}</span>`:''}</td>
+        <td>${lvPill(lv)}</td>
         <td data-c="hide">${esc(joinV(c.action))}</td>
         <td class="num" data-c="hide">${costTotal(c)?won(costTotal(c)):''}</td>
         <td><span class="pill st-${st}">${st}</span></td>
@@ -238,7 +249,7 @@ function renderList(){
     <div class="filters">
       ${S.me.role?`<button type="button" class="btn ${S.f.mine?'primary':''}" data-act="mine" aria-pressed="${S.f.mine}">내 결재 대기 ${S.claims.filter(needsMe).length}건</button>`:''}
       <span><span class="flabel">처리 상태</span>${segHTML('status',['전체','접수','처리중','종결'],S.f.status)}</span>
-      <span><span class="flabel">중요도</span>${segHTML('sev',['전체','S','A','B'],S.f.sev)}</span>
+      <span><span class="flabel">처리 단계</span>${segHTML('lv',['전체',...LEVELS.map(l=>l.short)],S.f.lv)}</span>
       <span><span class="flabel">유형</span><select class="sm" id="f-type"><option>전체</option>${OPT.claimType.map(t=>`<option ${t===S.f.type?'selected':''}>${esc(t)}</option>`).join('')}</select></span>
       <input class="search" id="f-q" type="search" placeholder="문서번호, 고객명, 주소, 작성자 검색" value="${esc(S.f.q)}">
       ${S.claims.length?'<button class="btn ghost" data-act="csv">CSV 내보내기</button>':''}
@@ -253,15 +264,15 @@ function renderList(){
     tr.addEventListener('keydown',e=>{ if(e.key==='Enter') go('doc',tr.dataset.open); });
   });
   app.querySelector('[data-act="new"]')?.addEventListener('click',()=>go('edit'));
-  app.querySelector('[data-act="reset"]')?.addEventListener('click',()=>{ S.f={status:'전체',sev:'전체',type:'전체',q:'',mine:false}; renderList(); });
+  app.querySelector('[data-act="reset"]')?.addEventListener('click',()=>{ S.f={status:'전체',lv:'전체',type:'전체',q:'',mine:false}; renderList(); });
   app.querySelector('[data-act="mine"]')?.addEventListener('click',()=>{ S.f.mine=!S.f.mine; renderList(); });
   app.querySelector('[data-act="csv"]')?.addEventListener('click',()=>exportCSV(rows));
 }
 
 function exportCSV(rows){
-  const head = ['No','문서번호','작성일자','작성자','보고 구분','고객명','현장 주소','계약번호','계약금액(원)','공사 시작일','공사 종료일','접수일','접수 경로','클레임 유형','중요도','결재 범위','발생일시','발생 공정','시공 업체','주요 사고내용','원인 구분','책임 소재','처리 방안','조치 담당','완료 예정일','비용 합계(원)','비용 부담 주체','최종 처리일','고객 만족도','종결 여부','처리 상태','경과일'];
+  const head = ['No','문서번호','작성일자','작성자','고객명','고객 연락처','현장 주소','계약번호','계약금액(원)','공사 시작일','공사 종료일','접수일','접수 경로','클레임 유형','처리 단계','결재 범위','발생일시','발생 공정','시공 업체','주요 사고내용','원인 구분','책임 소재','처리 방안','조치 담당','완료 예정일','비용 산정(원)','지급 완료(원)','지급 예정(원)','비용 부담 주체','최종 처리일','고객 만족도','종결 여부','처리 상태','경과일'];
   const q = v => { const s=String(v??''); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; };
-  const lines = [head.join(',')].concat(rows.map((c,i)=>[i+1,c.docNo,c.createdAt,c.author,c.reportType,c.customer,c.address,c.contractNo,c.contractAmount,c.periodStart,c.periodEnd,c.receivedAt,joinV(c.channel),joinV(c.claimType),c.severity,routeOf(sevKey(c.severity)),fmtDate(c.occurredAt),joinV(c.process),c.contractor,c.summary,joinV(c.causeType),c.responsibility,joinV(c.action),c.actionOwner,c.dueDate,costTotal(c)||'',joinV(c.costBearer),c.finalDate,c.satisfaction,c.closed,statusOf(c),elapsed(c)].map(q).join(',')));
+  const lines = [head.join(',')].concat(rows.map((c,i)=>[i+1,c.docNo,c.createdAt,c.author,c.customer,c.phone,c.address,c.contractNo,c.contractAmount,c.periodStart,c.periodEnd,c.receivedAt,joinV(c.channel),joinV(c.claimType),levelOf(c)?.label||'',routeOf(levelOf(c)),fmtDate(c.occurredAt),joinV(c.process),c.contractor,c.summary,joinV(c.causeType),c.responsibility,joinV(c.action),c.actionOwner,c.dueDate,costTotal(c)||'',paidSum(c,'지급 완료')||'',paidSum(c,'예정')||'',joinV(c.costBearer),c.finalDate,c.satisfaction,c.closed,statusOf(c),elapsed(c)].map(q).join(',')));
   const blob = new Blob(['\ufeff'+lines.join('\r\n')], {type:'text/csv;charset=utf-8'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `클레임_관리대장_${todayStr()}.csv`;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
@@ -273,18 +284,102 @@ function valHTML(c,key,type){
   if(type==='money') v = v!==''&&v!=null ? won(v)+' 원' : '';
   else if(type==='datetime') v = fmtDate(v);
   else if(type==='multi') v = joinV(v);
+  else if(type==='level') v = levelOf(c)?.label || '';
   else if(type==='vendors') v = vendorsOf(c).map(vendorLine).filter(Boolean).join('\n');
+  else if(type==='attach'){
+    const list = Array.isArray(c.attachments) ? c.attachments : [];
+    if(!list.length) return `<dd class="blank">—</dd>`;
+    return `<dd><div class="att-view">${list.map(a=>{ const k=attKind(a);
+      if(k==='audio') return `<div class="att-audio"><span>${attIcon(a)} ${esc(a.name)} <span class="guide">${fmtSize(a.size)}</span></span><audio controls preload="none" data-att="${esc(a.path)}"></audio><a data-att="${esc(a.path)}" href="#" target="_blank" rel="noopener" class="guide">파일 받기</a></div>`;
+      if(k==='image') return `<a class="att-img" data-att="${esc(a.path)}" href="#" target="_blank" rel="noopener"><img data-att="${esc(a.path)}" alt="${esc(a.name)}"></a>`;
+      return `<a class="att-file" data-att="${esc(a.path)}" href="#" target="_blank" rel="noopener">${attIcon(a)} ${esc(a.name)} <span class="guide">${fmtSize(a.size)}</span></a>`;
+    }).join('')}</div></dd>`;
+  }
+  else if(type==='payouts'){
+    const list = payoutsOf(c);
+    if(!list.length) return `<dd class="blank">—</dd>`;
+    return `<dd><table class="cost pay-tbl"><thead><tr><th>지급일</th><th>항목</th><th class="num">금액 (원)</th><th>받는 곳</th><th>상태</th></tr></thead><tbody>${list.map(p=>`<tr><td class="mono">${esc(p.date||'')}</td><td>${esc(p.item||'')}</td><td class="num">${won(p.amt)}</td><td>${esc(p.to||'')}</td><td><span class="pill ${p.status==='지급 완료'?'st-종결':'st-접수'}">${esc(p.status||'예정')}</span></td></tr>`).join('')}
+      <tr class="total"><td colspan="2">지급 완료 합계</td><td class="num">${won(paidSum(c,'지급 완료'))}</td><td colspan="2" class="guide">예정 ${won(paidSum(c,'예정'))}원</td></tr></tbody></table></dd>`;
+  }
   return v ? `<dd>${esc(v)}</dd>` : `<dd class="blank">—</dd>`;
+}
+function escalationHTML(c, lv, canW){
+  const cur = lv ? lv.i : -1;
+  const log = Array.isArray(c.escalations) ? c.escalations : [];
+  const next = LEVELS[cur+1];
+  const open = S.escOpen === c._id;
+  return `<section class="esc">
+    <div class="esc-head"><h2>처리 단계</h2><span class="guide">해결이 안 되면 다음 단계로 올립니다. 올리면 결재 범위도 한 칸 늘어납니다.</span></div>
+    <ol class="esc-steps">${LEVELS.map((l,i)=>`<li class="${i<cur?'done':i===cur?'cur':''}"><b>${esc(l.short)}</b><span>${i===cur?'지금 단계':i<cur?'거침':''}</span></li>`).join('')}</ol>
+    ${log.length?`<ul class="esc-log">${log.map((e,k)=>{
+      const open = S.kakaoOpen===c._id+':'+k;
+      return `<li><div class="esc-line"><span><span class="mono">${esc(e.date||'')}</span> <b>${esc(LV[e.to]?.label||e.to)}</b>으로 올림${e.by?` · ${esc(memberName(e.by))}`:''}${e.reason?`<br><span class="guide">${esc(e.reason)}</span>`:''}</span>
+        <button class="btn ghost kakao-btn" data-kakao="${k}">${open?'카톡 문구 닫기':'카톡 문구'}</button></div>
+        ${open?`<div class="kakao-box"><textarea id="kakao-${k}" readonly>${esc(kakaoText(c,e))}</textarea><button class="btn primary" data-copy="${k}">복사하기</button></div>`:''}</li>`;}).join('')}</ul>`:''}
+    ${canW && next && statusOf(c)!=='종결' ? (open
+      ? `<div class="esc-form"><label for="esc-reason">${esc(next.label)}으로 올리는 이유</label>
+           <textarea id="esc-reason" placeholder="예: 고객이 재시공 일정에 동의하지 않아 팀장 면담 요청"></textarea>
+           <div class="esc-btns"><button class="btn primary" data-act="esc-go">${esc(next.short)}에게 올리기</button><button class="btn" data-act="esc-cancel">취소</button></div></div>`
+      : `<button class="btn esc-up" data-act="esc-open">▲ ${esc(next.label)}으로 올리기</button>`) : ''}
+  </section>`;
+}
+// 본부방에 붙여 넣을 카톡 문구
+function claimLink(c){ return location.origin + location.pathname + '#doc-' + c._id; }
+function kakaoText(c, e){
+  const to = LV[e.to], from = e.from ? LV[e.from] : LEVELS[(to?.i||1)-1];
+  const lines = [
+    `[클레임 단계 상향] ${c.docNo||''}`,
+    `${from?from.label:''} → ${to?to.label:e.to}`,
+    ``,
+    `고객: ${c.customer||'-'}`,
+    `현장: ${c.address||'-'}`,
+    `유형: ${[joinV(c.claimType), joinV(c.process)].filter(Boolean).join(' · ')||'-'}`,
+    `접수일: ${c.receivedAt||'-'} (경과 ${elapsed(c)===''?'-':elapsed(c)+'일'})`,
+    `내용: ${String(c.summary||'-').replace(/\s+/g,' ').slice(0,120)}`,
+    ``,
+    `올린 이유: ${e.reason||'-'}`,
+    `올린 사람: ${e.by?memberName(e.by):'-'} (${e.date||''})`,
+    ``,
+    `비용 산정 ${won(costTotal(c))||0}원 / 지급 완료 ${won(paidSum(c,'지급 완료'))||0}원`,
+    `결재 범위: ${to?routeOf(to):''}`,
+    `${to?to.short:''}님 확인 부탁드립니다.`,
+    ``,
+    `보고서: ${claimLink(c)}`
+  ];
+  return lines.join('\n');
+}
+async function copyText(text, ta){
+  try{ await navigator.clipboard.writeText(text); toast('카톡 문구를 복사했습니다. 본부방에 붙여 넣으세요.'); }
+  catch(_){ if(ta){ ta.focus(); ta.select(); } toast('글자를 길게 눌러 복사해 주세요.'); }
+}
+function bindEscalation(c, lv){
+  app.querySelectorAll('[data-kakao]').forEach(b=>b.addEventListener('click',()=>{
+    const k = b.dataset.kakao; S.kakaoOpen = (S.kakaoOpen===c._id+':'+k) ? null : c._id+':'+k; renderDoc();
+  }));
+  app.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',()=>{
+    const ta = app.querySelector('#kakao-'+b.dataset.copy); copyText(ta.value, ta);
+  }));
+  const next = LEVELS[(lv ? lv.i : -1)+1];
+  app.querySelector('[data-act="esc-open"]')?.addEventListener('click',()=>{ S.escOpen=c._id; renderDoc(); setTimeout(()=>app.querySelector('#esc-reason')?.focus(),0); });
+  app.querySelector('[data-act="esc-cancel"]')?.addEventListener('click',()=>{ S.escOpen=null; renderDoc(); });
+  app.querySelector('[data-act="esc-go"]')?.addEventListener('click',async()=>{
+    const reason = app.querySelector('#esc-reason').value.trim();
+    if(!reason){ toast('올리는 이유를 적어 주세요.'); return; }
+    S.escOpen = null;
+    const log = (Array.isArray(c.escalations)?c.escalations:[]).concat([{from:lv?lv.key:null, to:next.key, date:todayStr(), by:S.email||null, reason}]);
+    S.kakaoOpen = c._id+':'+(log.length-1);
+    await patch(c._id, {level:next.key, escalations:log}, `${next.label} 단계로 올렸습니다. 아래 카톡 문구를 복사해 본부방에 올려 주세요.`);
+  });
 }
 async function renderDoc(){
   const c = S.all.find(x=>x._id===S.id);
   if(!c){ app.innerHTML = `<div class="empty" style="margin-top:28px"><h3>보고서를 찾을 수 없습니다</h3><p>삭제되었거나 아직 불러오는 중입니다.</p><button class="btn" data-act="back">관리대장으로</button></div>`; app.querySelector('[data-act="back"]').onclick=()=>go('list'); return; }
   const canW = S.canWrite && !c.example;
-  const k = sevKey(c.severity), st = statusOf(c), steps = STD[k]?.steps || 0;
+  const lv = levelOf(c), st = statusOf(c), steps = lv?.steps || 0;
   const ap = c.approvals || {};
   const apCells = ROLES.map((r,i)=>{
     if(i===0) return `<td><div class="stamp-btn" style="cursor:default"><span class="stamp">작성</span><span class="stamp-date">${esc(c.createdAt||'')}</span></div></td>`;
-    if(!steps || i>=steps) return `<td class="off"><span>${steps?'해당 없음':'중요도 선택'}</span></td>`;
+    if(!steps || i>=steps) return `<td class="off"><span>${steps?'해당 없음':'단계 선택'}</span></td>`;
     const a = ap[r];
     const mine = canW && (S.me.role===r || S.me.isAdmin);
     if(a?.date){
@@ -314,16 +409,17 @@ async function renderDoc(){
           <h1 class="doc-title">클레임 보고서</h1>
           <div class="doc-meta">
             ${c.example?'<span class="pill ex">작성 예시</span>':''}<span class="mono">${esc(c.docNo||'')}</span>
-            ${k?`<span class="pill sev-${k}">${esc(c.severity)} · ${STD[k].grade}</span>`:''}
+            ${lvPill(lv)}
             <span class="pill st-${st}">${st}</span>
             ${c.reportType?`<span style="color:var(--ink-3);font-size:12px">${esc(c.reportType)}</span>`:''}
           </div>
         </div>
         <div style="overflow-x:auto;max-width:100%">
           <table class="approve"><tr>${ROLES.map(r=>`<th>${esc(r)}</th>`).join('')}</tr><tr>${apCells}</tr></table>
-          <div class="approve-route">${steps?'결재 범위: '+esc(routeOf(k)):'중요도를 선택하면 결재 범위가 정해집니다'}</div>
+          <div class="approve-route">${steps?'결재 범위: '+esc(routeOf(lv)):'처리 단계를 고르면 결재 범위가 정해집니다'}</div>
         </div>
       </div>
+      ${escalationHTML(c, lv, canW)}
       ${secs}
       <section class="sec"><h2><i>8.</i>사고 현장 증빙</h2><p class="guide">사진을 누르면 원본이 새 탭에서 열립니다.</p>
         <div class="photos">
@@ -340,6 +436,8 @@ async function renderDoc(){
       ${canW?(S.confirmDel?'<span class="confirm">이 보고서를 삭제할까요? <button class="btn danger" data-act="del-yes">삭제</button><button class="btn" data-act="del-no">취소</button></span>':'<button class="btn ghost" data-act="del">삭제</button>'):''}
     </div>`;
   loadPhotoUrls(photos);
+  loadAttUrls((Array.isArray(c.attachments)?c.attachments:[]).map(a=>a.path));
+  bindEscalation(c, lv);
   app.querySelector('[data-act="back"]').onclick=()=>go('list');
   app.querySelector('[data-act="new-from-ex"]')?.addEventListener('click',()=>go('edit'));
   app.querySelector('[data-act="edit"]')?.addEventListener('click',()=>go('edit',c._id));
@@ -379,6 +477,16 @@ async function patch(id,data,msg){
 }
 
 /* ---------- 작성 / 수정 ---------- */
+function payoutRowHTML(p={}){
+  return `<div class="pay-row">
+    <input type="date" data-p="date" value="${esc(p.date||'')}" aria-label="지급일">
+    <select data-p="item" aria-label="항목">${COSTS.map(([,l])=>`<option ${l===p.item?'selected':''}>${esc(l)}</option>`).join('')}</select>
+    <input type="text" data-p="amt" data-money inputmode="numeric" value="${esc(won(p.amt))}" placeholder="금액 (원)" aria-label="금액" style="text-align:right">
+    <input type="text" data-p="to" value="${esc(p.to||'')}" placeholder="받는 곳 (고객·업체)" aria-label="받는 곳">
+    <select data-p="status" aria-label="상태">${PAY_STATUS.map(x=>`<option ${x===(p.status||'예정')?'selected':''}>${x}</option>`).join('')}</select>
+    <button type="button" class="btn ghost" data-act="pay-del" aria-label="이 지급 빼기">×</button>
+  </div>`;
+}
 function vendorRowHTML(v={}){
   return `<div class="vendor-row">
     <input type="text" data-v="name" value="${esc(v.name||'')}" placeholder="업체명" aria-label="업체명">
@@ -399,7 +507,6 @@ function fieldHTML(c,[key,label,type,o]){
     } else {
       input = `<select id="${id}"><option value="">선택하세요</option>${opts.map(op=>`<option ${op===v?'selected':''}>${esc(op)}</option>`).join('')}</select>`;
     }
-    if(key==='severity') input += `<div class="auto" id="sev-auto"></div>`;
     return `<div class="fld${wide}"><span class="lbl">${esc(label)}</span>${input}</div>`;
   }
   if(type==='multi'){
@@ -413,26 +520,53 @@ function fieldHTML(c,[key,label,type,o]){
       <div class="vendors" id="${id}">${(list.length?list:[{}]).map(vendorRowHTML).join('')}</div>
       <div><button type="button" class="btn ghost" data-act="vendor-add">+ 업체 추가</button></div></div>`;
   }
+  if(type==='attach'){
+    const list = (Array.isArray(c.attachments)?c.attachments:[]).filter(a=>!S.attRemoved.has(a.path));
+    return `<div class="fld${wide}"><span class="lbl">${esc(label)} <span class="guide" style="font-weight:400">· 녹음 파일(m4a·mp3 등), 캡처 이미지, 카톡 대화 내보내기(txt) · 한 파일 50MB까지</span></span>
+      <div class="att-list" id="att-list">${list.map(a=>`<div class="att-item"><span>${attIcon(a)} ${esc(a.name)} <span class="guide">${fmtSize(a.size)}</span></span><button type="button" class="btn ghost" data-att-del="${esc(a.path)}" aria-label="이 자료 빼기">×</button></div>`).join('')}
+        ${S.attPending.map((f,i)=>`<div class="att-item pending"><span>${attIcon({type:f.type,name:f.name})} ${esc(f.name)} <span class="guide">${fmtSize(f.size)} · 저장할 때 올라감</span></span><button type="button" class="btn ghost" data-att-cancel="${i}" aria-label="이 자료 빼기">×</button></div>`).join('')}</div>
+      <label class="att-drop" for="att-in">+ 녹취·캡처·파일 첨부 (여러 개 선택 가능)</label>
+      <input id="att-in" type="file" multiple hidden accept="audio/*,image/*,video/*,.txt,.pdf,.zip,.m4a,.amr,.3gp,.mp3,.wav,.aac">
+    </div>`;
+  }
+  if(type==='payouts'){
+    const list = payoutsOf(c);
+    return `<div class="fld${wide}"><span class="lbl">${esc(label)} <span class="guide" style="font-weight:400">· 보상비·재시공비 등 실제로 나가는 돈을 나갈 때마다 한 줄씩</span></span>
+      <div class="pays" id="${id}">${list.map(payoutRowHTML).join('')}</div>
+      <div class="pay-foot"><button type="button" class="btn ghost" data-act="pay-add">+ 지급 추가</button><span class="guide" id="pay-sum"></span></div></div>`;
+  }
+  if(type==='level'){
+    const cur = levelOf(c)?.key || '담당자';
+    input = `<div class="chips" role="radiogroup" aria-label="${esc(label)}">`+LEVELS.map((l,i)=>`<label class="chip"><input type="radio" name="${id}" id="${id}_${i}" value="${esc(l.key)}" ${l.key===cur?'checked':''}><span>${esc(l.label)}</span></label>`).join('')+`</div><div class="auto" id="lv-auto"></div>`;
+    return `<div class="fld${wide}"><span class="lbl">${esc(label)} <span class="guide" style="font-weight:400">· 지금 누가 대응하고 있나요?</span></span>${input}</div>`;
+  }
   if(type==='textarea') input = `<textarea id="${id}"${ph}>${esc(v)}</textarea>`;
   else if(type==='date') input = `<input type="date" id="${id}" value="${esc(v)}">`;
   else if(type==='datetime') input = `<input type="datetime-local" id="${id}" value="${esc(v)}">`;
+  else if(type==='tel') input = `<input type="tel" id="${id}" value="${esc(v)}" placeholder="010-0000-0000" inputmode="tel">`;
   else if(type==='money') input = `<input type="text" inputmode="numeric" id="${id}" value="${esc(won(v))}" data-money style="text-align:right">`;
   else input = `<input type="text" id="${id}" value="${esc(v)}"${ph}>`;
   return `<div class="fld${wide}"><label for="${id}">${esc(label)}</label>${input}</div>`;
 }
 function renderEdit(){
   const editing = S.id ? S.claims.find(x=>x._id===S.id) : null;
-  const c = editing || {createdAt:todayStr(), receivedAt:todayStr(), reportType:'최초 보고'};
+  const c = editing || {receivedAt:todayStr(), level:'담당자'};
+  if(S.attFor !== (S.id||'new')){ S.attFor = S.id||'new'; S.attPending = []; S.attRemoved = new Set(); }
+  const secHTML = sec=>`<section class="form-sec"><h2>${sec.no?`<i>${sec.no}.</i>`:''}${esc(sec.title)}</h2>${sec.guide?`<p class="guide">${esc(sec.guide)}</p>`:''}
+        ${sec.costs?`<table class="cost-in"><thead><tr><th style="width:34%">항목</th><th style="width:28%">금액 (원)</th><th>비고</th></tr></thead><tbody>`+
+          COSTS.map(([ck,cl])=>`<tr><td>${cl}</td><td><input class="money" inputmode="numeric" id="c_${ck}_amt" data-money value="${esc(won(c.costs?.[ck]?.amt))}" aria-label="${cl} 금액"></td><td><input id="c_${ck}_note" value="${esc(c.costs?.[ck]?.note||'')}" aria-label="${cl} 비고"></td></tr>`).join('')+
+          `<tr class="total"><td>합계</td><td class="num" id="cost-total">0</td><td></td></tr></tbody></table>`:''}
+        <div class="grid">${sec.fields.map(f=>fieldHTML(c,f)).join('')}</div></section>`;
   app.innerHTML = `
     <div class="back"><button class="btn ghost" data-act="cancel">← ${editing?'보고서로':'관리대장으로'}</button></div>
     <h1 class="page">${editing?'보고서 수정':'새 클레임 보고서'}</h1>
-    <p class="sub">${editing?esc(c.docNo||''):'필요한 칸만 채워도 저장할 수 있습니다. 사진과 결재는 저장 후 보고서 화면에서 처리합니다.'}${!editing&&S.examples.length?' <button type="button" class="linkish" data-act="see-ex">작성 예시 보기</button>':''}</p>
+    <p class="sub">${editing?esc(c.docNo||''):'전화를 받으며 접수 칸만 채워도 저장됩니다. 문서번호·작성자·작성일은 자동으로 들어갑니다.'}${!editing&&S.examples.length?' <button type="button" class="linkish" data-act="see-ex">작성 예시 보기</button>':''}</p>
     <form id="frm" novalidate>
-      ${SECTIONS.map(sec=>`<section class="form-sec"><h2>${sec.no?`<i>${sec.no}.</i>`:''}${esc(sec.title)}</h2>${sec.guide?`<p class="guide">${esc(sec.guide)}</p>`:''}
-        ${sec.costs?`<table class="cost-in"><thead><tr><th style="width:34%">항목</th><th style="width:28%">금액 (원)</th><th>비고</th></tr></thead><tbody>`+
-          COSTS.map(([ck,cl])=>`<tr><td>${cl}</td><td><input class="money" inputmode="numeric" id="c_${ck}_amt" data-money value="${esc(won(c.costs?.[ck]?.amt))}" aria-label="${cl} 금액"></td><td><input id="c_${ck}_note" value="${esc(c.costs?.[ck]?.note||'')}" aria-label="${cl} 비고"></td></tr>`).join('')+
-          `<tr class="total"><td>합계</td><td class="num" id="cost-total">0</td><td id="cost-sug" style="font-weight:400;color:var(--ink-3);font-size:12px"></td></tr></tbody></table>`:''}
-        <div class="grid">${sec.fields.map(f=>fieldHTML(c,f)).join('')}</div></section>`).join('')}
+      ${SECTIONS.filter(x=>x.intake).map(secHTML).join('')}
+      <details class="later" ${editing?'open':''}>
+        <summary>처리하면서 채울 항목 <span class="guide">계약 정보 · 사고 경위 · 원인 · 피해 · 조치 · 비용 · 재발 방지 · 처리 결과 · 결재 의견</span></summary>
+        ${SECTIONS.filter(x=>!x.intake).map(secHTML).join('')}
+      </details>
       <div class="save-bar">
         <button type="button" class="btn" data-act="cancel">취소</button>
         <button type="submit" class="btn primary" id="btn-save">${editing?'변경 내용 저장':'보고서 저장'}</button>
@@ -441,14 +575,31 @@ function renderEdit(){
   const frm = app.querySelector('#frm');
   app.querySelectorAll('[data-act="cancel"]').forEach(b=>b.onclick=()=>editing?go('doc',editing._id):go('list'));
   app.querySelector('[data-act="see-ex"]')?.addEventListener('click',()=>go('doc',S.examples[0]._id));
-  frm.querySelectorAll('[data-money]').forEach(inp=>inp.addEventListener('input',()=>{
+  const bindMoney = inp => inp.addEventListener('input',()=>{
     const n = parseNum(inp.value); const pos = inp.value.length - inp.selectionStart;
     inp.value = n===''?'':won(n); const p = Math.max(0,inp.value.length-pos); inp.setSelectionRange(p,p); updateAuto();
-  }));
+  });
+  frm.querySelectorAll('[data-money]').forEach(bindMoney);
+  const refreshAtt = ()=>{ const f = SECTIONS.flatMap(x=>x.fields).find(x=>x[2]==='attach'); const box = frm.querySelector('#att-list').closest('.fld'); box.outerHTML = fieldHTML(Object.assign({}, c), f); bindAttInput(); };
+  const bindAttInput = ()=> frm.querySelector('#att-in')?.addEventListener('change', e=>{
+    const files = [...e.target.files];
+    const big = files.filter(f=>f.size > 50*1024*1024);
+    if(big.length) toast(`50MB가 넘는 파일은 올릴 수 없습니다: ${big.map(f=>f.name).join(', ')}`);
+    S.attPending.push(...files.filter(f=>f.size <= 50*1024*1024));
+    refreshAtt();
+  });
+  bindAttInput();
   frm.addEventListener('change',updateAuto);
   frm.addEventListener('click',e=>{
     const add = e.target.closest('[data-act="vendor-add"]');
     if(add){ const box = frm.querySelector('#f_contractor'); box.insertAdjacentHTML('beforeend', vendorRowHTML()); box.lastElementChild.querySelector('input').focus(); return; }
+    const ad = e.target.closest('[data-att-del]');
+    if(ad){ S.attRemoved.add(ad.dataset.attDel); ad.closest('.att-item').remove(); return; }
+    const ac = e.target.closest('[data-att-cancel]');
+    if(ac){ S.attPending.splice(Number(ac.dataset.attCancel),1); refreshAtt(); return; }
+    if(e.target.closest('[data-act="pay-add"]')){ const box = frm.querySelector('#f_payouts'); box.insertAdjacentHTML('beforeend', payoutRowHTML({date:todayStr()})); bindMoney(box.lastElementChild.querySelector('[data-money]')); box.lastElementChild.querySelector('[data-p="amt"]').focus(); updateAuto(); return; }
+    const pdel = e.target.closest('[data-act="pay-del"]');
+    if(pdel){ pdel.closest('.pay-row').remove(); updateAuto(); return; }
     const del = e.target.closest('[data-act="vendor-del"]');
     if(del){ const box = frm.querySelector('#f_contractor'); const row = del.closest('.vendor-row');
       if(box.children.length>1) row.remove(); else row.querySelectorAll('input').forEach(i=>i.value=''); }
@@ -456,11 +607,11 @@ function renderEdit(){
   function updateAuto(){
     const tot = COSTS.reduce((a,[ck])=>a+(Number(parseNum(frm.querySelector('#c_'+ck+'_amt').value))||0),0);
     frm.querySelector('#cost-total').textContent = won(tot);
-    const sug = suggestSev(tot);
-    frm.querySelector('#cost-sug').textContent = sug ? `금액 기준 권장 중요도: ${sug}` : '';
-    const sev = frm.querySelector('input[name="f_severity"]:checked')?.value || '';
-    const k = sevKey(sev);
-    frm.querySelector('#sev-auto').innerHTML = k ? `결재 범위 (자동): <b>${esc(routeOf(k))}</b><br><span style="color:var(--ink-3)">${esc(STD[k].grade)} · ${esc(stdText(k))}</span>` : '중요도를 선택하면 결재 범위가 자동으로 표시됩니다.';
+    const pays = [...frm.querySelectorAll('#f_payouts .pay-row')].map(r=>({amt:Number(parseNum(r.querySelector('[data-p="amt"]').value))||0, st:r.querySelector('[data-p="status"]').value}));
+    const done = pays.filter(p=>p.st==='지급 완료').reduce((a,p)=>a+p.amt,0), plan = pays.filter(p=>p.st!=='지급 완료').reduce((a,p)=>a+p.amt,0);
+    frm.querySelector('#pay-sum').textContent = pays.length ? `지급 완료 ${won(done)}원 · 예정 ${won(plan)}원` : '아직 지급 내역이 없습니다';
+    const lv = LV[frm.querySelector('input[name="f_level"]:checked')?.value || ''];
+    frm.querySelector('#lv-auto').innerHTML = lv ? `결재 범위 (자동): <b>${esc(routeOf(lv))}</b><br><span style="color:var(--ink-3)">${esc(lv.when)}</span>` : '처리 단계를 고르면 결재 범위가 자동으로 표시됩니다.';
   }
   updateAuto();
   frm.addEventListener('submit',async e=>{
@@ -470,7 +621,18 @@ function renderEdit(){
     SECTIONS.forEach(sec=>sec.fields.forEach(([key,,type])=>{
       if(type==='select') data[key] = (frm.querySelector(`[name="f_${key}"]:checked`)?.value) ?? (frm.querySelector('#f_'+key)?.value||'');
       else if(type==='multi') data[key] = [...frm.querySelectorAll(`[name="f_${key}"]:checked`)].map(x=>x.value);
+      else if(type==='level') data[key] = frm.querySelector(`[name="f_${key}"]:checked`)?.value || '담당자';
       else if(type==='money') data[key] = parseNum(frm.querySelector('#f_'+key).value);
+      else if(type==='attach'){ /* 저장 뒤에 따로 올린다 */ }
+      else if(type==='payouts'){
+        data[key] = [...frm.querySelectorAll('#f_payouts .pay-row')].map(r=>({
+          date:r.querySelector('[data-p="date"]').value,
+          item:r.querySelector('[data-p="item"]').value,
+          amt:parseNum(r.querySelector('[data-p="amt"]').value),
+          to:r.querySelector('[data-p="to"]').value.trim(),
+          status:r.querySelector('[data-p="status"]').value
+        })).filter(p=>p.amt!=='' || p.to);
+      }
       else if(type==='vendors'){
         data.contractors = [...frm.querySelectorAll('#f_'+key+' .vendor-row')].map(r=>({
           name:r.querySelector('[data-v="name"]').value.trim(),
@@ -484,12 +646,32 @@ function renderEdit(){
     data.costs = {};
     COSTS.forEach(([ck])=>{ data.costs[ck] = {amt:parseNum(frm.querySelector('#c_'+ck+'_amt').value), note:frm.querySelector('#c_'+ck+'_note').value.trim()}; });
     data.costTotal = COSTS.reduce((a,[ck])=>a+(Number(data.costs[ck].amt)||0),0);
-    if(!data.docNo) data.docNo = editing?.docNo || nextDocNo();
+    if(!editing){
+      const me = S.members.find(m=>m.email===S.email);
+      data.docNo = nextDocNo(); data.createdAt = todayStr();
+      data.author = me ? [me.dept, me.name].filter(Boolean).join(' / ') : (S.email||'');
+    }
     data.updatedAt = new Date().toISOString();
     const btn = frm.querySelector('#btn-save'); btn.disabled = true; btn.textContent='저장 중…';
     try{
-      if(editing){ await api.update(editing._id, data); toast('저장했습니다.'); go('doc',editing._id); }
-      else { data.photos=[]; data.approvals={}; data.createdBy=S.email||null; const newId = await api.insert(data); toast(`${data.docNo} 보고서를 등록했습니다.`); go('doc',newId); }
+      const kept = (Array.isArray(editing?.attachments)?editing.attachments:[]).filter(a=>!S.attRemoved.has(a.path));
+      const dropped = (Array.isArray(editing?.attachments)?editing.attachments:[]).filter(a=>S.attRemoved.has(a.path)).map(a=>a.path);
+      let id;
+      if(editing){ id = editing._id; await api.update(id, Object.assign(data, {attachments:kept})); }
+      else { Object.assign(data, {photos:[], approvals:{}, attachments:[], createdBy:S.email||null}); id = await api.insert(data); }
+      if(S.attPending.length){
+        btn.textContent = `자료 ${S.attPending.length}개 올리는 중…`;
+        const up = [];
+        for(const f of S.attPending){
+          try{ up.push({path: await api.uploadFile(id, f), name:f.name, type:f.type||'', size:f.size, at:new Date().toISOString()}); }
+          catch(_){ toast(`${f.name} 을(를) 올리지 못했습니다.`); }
+        }
+        if(up.length) await api.update(id, {attachments: kept.concat(up)});
+      }
+      if(dropped.length) api.removePhotos(dropped).catch(()=>{});
+      S.attPending = []; S.attRemoved = new Set(); S.attFor = null;
+      toast(editing ? '저장했습니다.' : `${data.docNo} 보고서를 등록했습니다.`);
+      go('doc', id);
     }catch(err){
       btn.disabled=false; btn.textContent= editing?'변경 내용 저장':'보고서 저장';
       toast('저장하지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.');
@@ -497,32 +679,26 @@ function renderEdit(){
   });
 }
 
-/* ---------- 결재 기준 ---------- */
+/* ---------- 처리 기준 ---------- */
 function renderStd(){
   app.innerHTML = `
-    <h1 class="page">결재 기준 (중요도별)</h1>
-    <p class="sub">금액 기준을 입력하면 아래 표와 보고서의 권장 중요도에 바로 반영됩니다. 비어 있으면 OO로 표시됩니다.</p>
+    <h1 class="page">처리 기준</h1>
+    <p class="sub">클레임은 담당자가 먼저 대응하고, 해결되지 않으면 팀장 → 본부장 → 대표·부대표 순서로 올라갑니다. 결재는 지금 대응하는 사람의 한 단계 위까지 받습니다.</p>
     <section class="form-sec">
-      <h2>금액 기준 입력</h2>
-      <div class="set-grid" style="margin-top:12px">
-        <div class="fld"><label for="cfg-minor">경미 / 보통 경계 (만 원)</label><input type="number" id="cfg-minor" min="0" value="${esc(S.cfg.minor??'')}" ${S.me.isAdmin?'':'disabled'}></div>
-        <div class="fld"><label for="cfg-major">보통 / 중대 경계 (만 원)</label><input type="number" id="cfg-major" min="0" value="${esc(S.cfg.major??'')}" ${S.me.isAdmin?'':'disabled'}></div>
-      </div>
-      ${S.me.isAdmin?'<div style="margin-top:14px"><button class="btn primary" id="cfg-save">기준 저장</button></div>':'<p class="guide" style="margin-top:12px">금액 기준은 관리자만 바꿀 수 있습니다.</p>'}
+      <h2>단계별 결재 범위</h2>
+      <div style="overflow-x:auto"><table class="std"><thead><tr><th>처리 단계</th><th>언제</th><th>결재 범위</th><th class="num">결재 칸</th></tr></thead><tbody>
+        ${LEVELS.map((l,i)=>`<tr><td>${lvPill(LV[l.key])}</td><td>${esc(l.when)}</td><td>${esc(routeOf(l))}</td><td class="num">${l.steps-1}명</td></tr>`).join('')}
+      </tbody></table></div>
     </section>
     <section class="form-sec">
-      <h2>기준표</h2>
-      <div style="overflow-x:auto"><table class="std"><thead><tr><th>중요도</th><th>클레임 등급</th><th>기준</th><th>결재 범위</th><th class="num">결재 단계</th></tr></thead><tbody>
-        ${OPT.severity.map(s=>{const k=sevKey(s);return `<tr><td><span class="pill sev-${k}">${esc(s)}</span></td><td>${STD[k].grade}</td><td>${esc(stdText(k))}</td><td>${esc(routeOf(k))}</td><td class="num">${STD[k].steps}명</td></tr>`;}).join('')}
-      </tbody></table></div>
-      <p class="guide" style="margin-top:12px">보고서에서 중요도를 고르면 결재 범위가 자동으로 정해지고, 결재가 필요 없는 칸은 빗금으로 바뀝니다. 결재자는 보고서 화면의 결재란을 눌러 결재합니다.</p>
+      <h2>이렇게 씁니다</h2>
+      <ol class="guide-list">
+        <li>보고서를 쓸 때 <b>처리 단계</b>는 보통 <b>담당자 처리</b>로 시작합니다.</li>
+        <li>해결이 안 되면 보고서 화면의 <b>▲ 다음 단계로 올리기</b>를 누르고 이유를 적습니다. 언제·누가·왜 올렸는지 기록이 남습니다.</li>
+        <li>단계가 올라가면 결재란 칸이 늘어나고, 새로 들어온 결재자에게 <b>내 결재 대기</b>로 보입니다.</li>
+        <li>결재자는 보고서 결재란에서 <b>자기 칸만</b> 누를 수 있습니다.</li>
+      </ol>
     </section>`;
-  app.querySelector('#cfg-save')?.addEventListener('click',async()=>{
-    const mi = app.querySelector('#cfg-minor').value, ma = app.querySelector('#cfg-major').value;
-    if(mi!=='' && ma!=='' && Number(mi)>=Number(ma)){ toast('보통 / 중대 경계는 경미 / 보통 경계보다 커야 합니다.'); return; }
-    try{ await api.saveCfg({minor: mi===''?'':Number(mi), major: ma===''?'':Number(ma)}); toast('결재 기준을 저장했습니다.'); }
-    catch(e){ toast('저장하지 못했습니다. 권한을 확인해 주세요.'); }
-  });
 }
 
 function renderBlocked(){
@@ -614,7 +790,8 @@ const api = {
     const cur = S.all.find(x=>x._id===id);
     const {error} = await sb.from('claims').delete().eq('id', id);
     if(error) throw error;
-    if(cur?.photos?.length) await api.removePhotos(cur.photos).catch(()=>{});
+    const files = (cur?.photos||[]).concat((cur?.attachments||[]).map(a=>a.path));
+    if(files.length) await api.removePhotos(files).catch(()=>{});
     await api.loadAll();
   },
   async loadMembers(){
@@ -645,6 +822,16 @@ const api = {
     if(error) throw error;
     return path;
   },
+  async uploadFile(claimId, file){
+    if(file.size > 50*1024*1024) throw {tooLarge:true};
+    const ext = ((file.name||'').split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'') || 'bin';
+    const MIME = {m4a:'audio/mp4', mp3:'audio/mpeg', wav:'audio/wav', aac:'audio/aac', amr:'audio/amr', '3gp':'audio/3gpp', ogg:'audio/ogg',
+                  txt:'text/plain', pdf:'application/pdf', zip:'application/zip', jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', heic:'image/heic', mp4:'video/mp4', mov:'video/quicktime'};
+    const path = `${claimId}/att-${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+    const {error} = await sb.storage.from(BUCKET).upload(path, file, {contentType: file.type || MIME[ext] || 'application/octet-stream'});
+    if(error) throw error;
+    return path;
+  },
   async removePhotos(paths){
     const {error} = await sb.storage.from(BUCKET).remove(paths);
     if(error) throw error;
@@ -660,6 +847,18 @@ async function loadPhotoUrls(paths){
   app.querySelectorAll('img[data-photo]').forEach(img=>{
     const u = S.photoUrls[img.dataset.photo];
     if(u && img.getAttribute('src')!==u){ img.src = u; img.closest('a').href = u; }
+  });
+}
+
+async function loadAttUrls(paths){
+  const need = paths.filter(p=>!S.photoUrls[p]);
+  if(need.length){
+    const {data} = await sb.storage.from(BUCKET).createSignedUrls(need, 60*60*6);
+    (data||[]).forEach(r=>{ if(r.signedUrl && r.path) S.photoUrls[r.path] = r.signedUrl; });
+  }
+  app.querySelectorAll('[data-att]').forEach(el=>{
+    const u = S.photoUrls[el.dataset.att]; if(!u) return;
+    if(el.tagName==='A') el.href = u; else if(el.getAttribute('src')!==u) el.src = u;
   });
 }
 
@@ -691,6 +890,8 @@ async function onSession(session){
   try{ await Promise.all([api.loadAll(), api.loadCfg(), api.loadMembers()]); S.offline = false; }
   catch(e){ S.loaded = true; S.offline = true; toast('데이터를 불러오지 못했습니다. 새로고침해 주세요.'); }
   subscribe();
+  const m = /^#doc-(.+)$/.exec(location.hash);
+  if(m && S.all.some(x=>x._id===m[1])){ go('doc', m[1]); return; }
   render();
 }
 
