@@ -615,7 +615,8 @@ const api = {
     const admins = new Set(adm.data.map(a=>a.email));
     S.members = emp.data.map(e=>Object.assign({}, e, {role:roleOfTitle(e.title), is_admin:admins.has(e.email)}));
     const m = S.members.find(x=>x.email===S.email);
-    S.staff = !!m && m.status==='재직';
+    // 관리자(app_admins)는 직원 시트에 없어도 들어온다 — 회사 대표 계정(official@) 같은 경우
+    S.staff = (!!m && m.status==='재직') || admins.has(S.email);
     S.me = {role:S.staff?m.role:null, isAdmin:S.staff&&m.is_admin, name:m?.name||''};
     document.getElementById('who-email').textContent = `${S.me.name||S.email}${S.me.role?' · '+S.me.role:''}${S.me.isAdmin?' · 관리자':''}`;
   },
