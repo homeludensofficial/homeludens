@@ -223,8 +223,6 @@ table.ledger{width:100%;border-collapse:collapse;font-size:13px}
 .btn.danger{color:var(--sev-s);border-color:var(--sev-s)}
 .login .form-sec .fld input{border:1px solid var(--line-2);border-radius:var(--r);padding:10px 12px;background:var(--sheet);width:100%;font-size:15px}
 @media (max-width:640px){.who span{display:none}}
-a.tab{text-decoration:none;display:inline-flex;align-items:center}
-a.tab::after{content:"↗";font-size:11px;margin-left:3px;color:var(--ink-3)}
 
 </style>
 </head>
@@ -236,7 +234,6 @@ a.tab::after{content:"↗";font-size:11px;margin-left:3px;color:var(--ink-3)}
       <button class="tab" id="tab-list" data-view="list">관리대장</button>
       <button class="tab" id="tab-std" data-view="std">결재 기준</button>
       <button class="tab" id="tab-admin" data-view="admin" hidden>직원 명단</button>
-      <a class="tab" href="../as/">AS 진행관리</a>
     </nav>
     <button class="btn primary" id="btn-new" hidden>+ 새 보고서</button>
     <div class="who" id="who" hidden><span id="who-email"></span><button class="btn ghost" id="btn-logout">로그아웃</button></div>
