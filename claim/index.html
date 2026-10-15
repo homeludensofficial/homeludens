@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="클레임">
 <title>홈루덴스 클레임 보고서</title>
 <!-- 카카오톡·문자로 주소를 보낼 때의 미리보기. 없으면 카카오가 페이지 안의 글자 로고를 크게 잘라 쓴다.
      그림을 바꾸면 카카오 캐시를 비워야 새 그림이 나온다: https://developers.kakao.com/tool/clear/og -->
@@ -294,6 +298,7 @@ details.later > summary .guide{font-weight:400}
 .login .form-sec .fld input{border:1px solid var(--line-2);border-radius:var(--r);padding:10px 12px;background:var(--sheet);width:100%;font-size:15px}
 @media (max-width:640px){.who span{display:none}}
 
+.who #btn-push[aria-pressed="true"]{color:var(--accent);font-weight:600}
 </style>
 </head>
 <body>
@@ -305,7 +310,7 @@ details.later > summary .guide{font-weight:400}
       <button class="tab" id="tab-std" data-view="std">처리 기준</button>
     </nav>
     <button class="btn primary" id="btn-new" hidden>+ 새 보고서</button>
-    <div class="who" id="who" hidden><span id="who-email"></span><button class="btn ghost" id="btn-logout">로그아웃</button></div>
+    <div class="who" id="who" hidden><span id="who-email"></span><button class="btn ghost" id="btn-push" hidden aria-pressed="false">알림 받기</button><button class="btn ghost" id="btn-logout">로그아웃</button></div>
   </div>
 </header>
 
@@ -314,6 +319,7 @@ details.later > summary .guide{font-weight:400}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
+<script src="push.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

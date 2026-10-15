@@ -902,6 +902,7 @@ async function onSession(session){
   if(!session){
     if(S.chan){ sb.removeChannel(S.chan); S.chan = null; }
     S.all = []; S.claims = []; S.examples = []; S.members = []; S.staff = false; S.me = {role:null, isAdmin:false, name:''}; S.loaded = false; S.view = 'list';
+    window.HLPush?.hide();
     render(); return;
   }
   if(sameUser && S.loaded) return;
@@ -909,12 +910,14 @@ async function onSession(session){
   try{ await Promise.all([api.loadAll(), api.loadCfg(), api.loadMembers()]); S.offline = false; }
   catch(e){ S.loaded = true; S.offline = true; toast('데이터를 불러오지 못했습니다. 새로고침해 주세요.'); }
   subscribe();
+  if(S.staff) window.HLPush?.init({sb, app:'claim', email:S.email, button:document.getElementById('btn-push'), toast});
   const m = /^#doc-(.+)$/.exec(location.hash);
   if(m && S.all.some(x=>x._id===m[1])){ go('doc', m[1]); return; }
   render();
 }
 
 document.getElementById('btn-logout').addEventListener('click', ()=>sb.auth.signOut());
+window.addEventListener('hashchange', ()=>{ const m = /^#doc-(.+)$/.exec(location.hash); if(m && S.loaded && S.all.some(x=>x._id===m[1]) && !(S.view==='doc' && S.id===m[1])) go('doc', m[1]); });
 
 if(!sb){
   document.getElementById('nav').hidden = true;

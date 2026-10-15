@@ -1,0 +1,10 @@
+{
+  "name": "홈루덴스 클레임 보고서",
+  "short_name": "클레임",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f4f1",
+  "theme_color": "#f6f4f1",
+  "icons": [{ "src": "apple-touch-icon-v2.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }]
+}
