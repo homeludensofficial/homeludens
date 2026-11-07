@@ -169,8 +169,21 @@ function go(view,id){
 }
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>go(b.dataset.view)));
 document.getElementById('btn-new').addEventListener('click',()=>go('edit'));
+document.querySelectorAll('#mtab [data-mv]').forEach(b=>b.addEventListener('click',()=>go(b.dataset.mv)));
 
+/* 휴대폰 아래 메뉴 줄: 지금 화면 표시 + 내 할 일(내 담당 미종결 + 내 결재 대기) 숫자 */
+function renderMtab(){
+  const nav = document.getElementById('mtab');
+  nav.hidden = !S.session || (S.loaded && !S.staff);
+  if(nav.hidden) return;
+  const cur = S.view==='edit' && !S.id ? 'edit' : (S.view==='doc'||S.view==='edit') ? 'list' : S.view;
+  nav.querySelectorAll('[data-mv]').forEach(b=>b.setAttribute('aria-current', String(b.dataset.mv===cur)));
+  document.getElementById('mt-new').hidden = !S.canWrite;
+  const todo = S.claims.filter(c=>c.owner===S.email && statusOf(c)!=='종결').length + (S.me.role ? S.claims.filter(needsMe).length : 0);
+  document.getElementById('mt-badge').textContent = todo || '';
+}
 function render(){
+  renderMtab();
   document.getElementById('nav').hidden = !S.session;
   document.getElementById('who').hidden = !S.session;
   if(!S.session){ renderLogin(); return; }
@@ -181,6 +194,7 @@ function render(){
   else if(S.view==='doc') renderDoc();
   else if(S.view==='edit') renderEdit();
   else if(S.view==='std') renderStd();
+  else if(S.view==='me') renderMe();
 }
 
 /* ---------- 관리대장 ---------- */
@@ -203,7 +217,7 @@ function filtered(){
   return S.claims.filter(c=>{
     if(S.f.mine && !needsMe(c)) return false;
     if(S.f.myown && !(c.owner===S.email && statusOf(c)!=='종결')) return false;
-    if(S.f.status!=='전체' && statusOf(c)!==S.f.status) return false;
+    if(S.f.status==='미종결' ? statusOf(c)==='종결' : (S.f.status!=='전체' && statusOf(c)!==S.f.status)) return false;
     if(S.f.lv!=='전체' && levelOf(c)?.short!==S.f.lv) return false;
     if(S.f.type!=='전체' && !toArr(c.claimType).includes(S.f.type)) return false;
     if(q){
@@ -215,6 +229,37 @@ function filtered(){
 }
 function segHTML(name,vals,cur){
   return `<div class="seg" role="group" aria-label="${esc(name)}">`+vals.map(v=>`<button type="button" data-seg="${esc(name)}" data-v="${esc(v)}" aria-pressed="${v===cur}">${esc(v)}</button>`).join('')+`</div>`;
+}
+/* ---------- 휴대폰 화면 조각 ---------- */
+const PHONE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 3.5h3l1.6 4.4-2.1 1.4a11.5 11.5 0 0 0 5.6 5.6l1.4-2.1 4.4 1.6v3a2 2 0 0 1-2.1 2A16.5 16.5 0 0 1 4.6 5.6a2 2 0 0 1 2-2.1z"/></svg>';
+const telOf = p => String(p||'').replace(/[^\d+]/g,'');
+const todayLabel = () => { const d=new Date(); return `${d.getMonth()+1}월 ${d.getDate()}일 ${'일월화수목금토'[d.getDay()]}요일`; };
+/** 먼저 볼 것: 내 결재 대기 → 고객 신청인데 담당자 없음 → 내 담당 14일 경과 → 내 담당인데 아직 처리 방안 없음 */
+function focusList(){
+  const out = [], seen = new Set(), add = (c,why) => { if(!seen.has(c._id)){ seen.add(c._id); out.push([c,why]); } };
+  const open = S.claims.filter(c=>statusOf(c)!=='종결');
+  if(S.me.role) S.claims.filter(needsMe).forEach(c=>add(c,'결재 대기'));
+  open.filter(c=>c.source==='고객 접수' && !c.owner).forEach(c=>add(c,'담당자 지정'));
+  open.filter(c=>c.owner===S.email && elapsed(c)>=14).forEach(c=>add(c,elapsed(c)+'일 경과'));
+  open.filter(c=>c.owner===S.email && statusOf(c)==='접수').forEach(c=>add(c,'처리 방안 입력'));
+  return out;
+}
+function mheadHTML(){
+  const fl = focusList();
+  return `<div class="only-m mhead"><small>${todayLabel()}${S.me.name?' · '+esc(S.me.name)+'님':''}</small>
+      <h2>${fl.length?`먼저 볼 것 <span>${fl.length}건</span>`:'먼저 볼 것이 없습니다'}</h2></div>
+    ${fl.length?`<div class="only-m mfocus">${fl.slice(0,5).map(([c,why])=>`<button type="button" data-open="${esc(c._id)}"><span class="why">${esc(why)}</span><span class="txt"><b>${esc(c.customer||'(고객명 미입력)')}</b><small>${esc([levelOf(c)?.label, statusOf(c), elapsed(c)===''?'':elapsed(c)===0?'오늘 접수':elapsed(c)+'일째'].filter(Boolean).join(' · '))}</small></span><span class="go" aria-hidden="true">›</span></button>`).join('')}${fl.length>5?`<p class="more">외 ${fl.length-5}건은 아래 목록에서</p>`:''}</div>`:''}`;
+}
+function mcardHTML(c){
+  const lv = levelOf(c), st = statusOf(c), el = elapsed(c), i = lv ? lv.i : -1, tel = telOf(c.phone);
+  const bar = st==='종결' ? 'var(--line-2)' : 'var(--brand)';
+  const who = c.owner ? `담당 ${esc(memberName(c.owner))}` : (st!=='종결' ? '<span class="need">담당자 지정 필요</span>' : '');
+  return `<div class="mcard" role="button" tabindex="0" data-open="${esc(c._id)}" style="--bar:${bar}">
+    <div class="t"><b>${esc(c.customer||'(고객명 미입력)')}${c.source==='고객 접수'?' <span class="pill ex">고객 신청</span>':''}</b>${tel?`<a class="mcall" href="tel:${esc(tel)}" aria-label="${esc(c.customer||'고객')}에게 전화">${PHONE_SVG}</a>`:''}</div>
+    <div class="a">${esc(c.address||c.docNo||'')}</div>
+    <div class="mtrack" title="처리 단계">${LEVELS.map((l,k)=>`<i class="${k<=i?'on':''}"></i>`).join('')}</div>
+    <div class="m"><span>${esc(lv?lv.label:'단계 미정')} · <b>${st}</b>${el===''?'':el===0?' · 오늘 접수':` · <span class="${st!=='종결'&&el>=14?'over':''}">${el}일째</span>`}</span><span>${who}</span></div>
+  </div>`;
 }
 function renderList(){
   const rows = filtered();
@@ -243,40 +288,49 @@ function renderList(){
         <td class="num" data-c="hide">${costTotal(c)?won(costTotal(c)):''}</td>
         <td><span class="pill st-${st}">${st}</span></td>
         <td class="num ${st!=='종결'&&el>=14?'over':''}">${el===''?'':el+'일'}</td>
-      </tr>`;}).join('')+`</tbody></table></div>`;
+      </tr>`;}).join('')+`</tbody></table></div>`
+    + `<div class="mcards">`+rows.map(mcardHTML).join('')+`</div>`;
   }
   app.innerHTML = `
-    <h1 class="page">클레임 관리대장</h1>
+    ${mheadHTML()}
+    <h1 class="page hide-m">클레임 관리대장</h1>
     <p class="sub">행을 누르면 보고서가 열립니다. 위 합계는 걸러 낸 결과만 계산합니다.${S.offline?' · 저장소에 연결되지 않아 이 화면에서는 저장되지 않습니다.':''}</p>
-    <div class="kpis">
+    <div class="mtiles">
+      <button type="button" class="mtile" data-act="m-open" aria-pressed="${S.f.status==='미종결'}"><strong>${S.claims.filter(c=>statusOf(c)!=='종결').length}</strong><span>처리 중</span></button>
+      <button type="button" class="mtile" data-act="myown" aria-pressed="${S.f.myown}"><strong>${S.claims.filter(c=>c.owner===S.email&&statusOf(c)!=='종결').length}</strong><span>내 담당</span></button>
+      ${S.me.role?`<button type="button" class="mtile ${S.claims.filter(needsMe).length?'hot':''}" data-act="mine" aria-pressed="${S.f.mine}"><strong>${S.claims.filter(needsMe).length}</strong><span>결재 대기</span></button>`:''}
+    </div>
+    <div class="kpis hide-m">
       <div class="kpi"><small>표시 건수</small><strong>${rows.length}<em>건</em></strong></div>
       <div class="kpi"><small>처리 중 (미종결)</small><strong>${open}<em>건</em></strong></div>
       <div class="kpi"><small>계약금액 합계</small><strong>${won(sumContract)}<em>원</em></strong></div>
       <div class="kpi"><small>비용 합계</small><strong>${won(sumCost)}<em>원</em></strong></div>
     </div>
-    ${S.examples.length?`<div class="ex-strip"><div class="ex-top"><span class="ex-label">작성 예시</span><span class="ex-hint">처음 쓰는 분은 예시를 먼저 열어 보세요. 합계와 대장에는 포함되지 않습니다.</span></div><div class="ex-cards">${S.examples.map(e=>`<button class="ex-card" data-open="${esc(e._id)}"><b>${esc(joinV(e.claimType)||'예시')} · ${esc(joinV(e.process))}</b><span>${esc((e.summary||'').slice(0,48))}${(e.summary||'').length>48?'…':''}</span></button>`).join('')}</div></div>`:''}
+    ${S.examples.length?`<div class="ex-strip hide-m"><div class="ex-top"><span class="ex-label">작성 예시</span><span class="ex-hint">처음 쓰는 분은 예시를 먼저 열어 보세요. 합계와 대장에는 포함되지 않습니다.</span></div><div class="ex-cards">${S.examples.map(e=>`<button class="ex-card" data-open="${esc(e._id)}"><b>${esc(joinV(e.claimType)||'예시')} · ${esc(joinV(e.process))}</b><span>${esc((e.summary||'').slice(0,48))}${(e.summary||'').length>48?'…':''}</span></button>`).join('')}</div></div>`:''}
     <div class="filters">
-      <button type="button" class="btn ${S.f.myown?'primary':''}" data-act="myown" aria-pressed="${S.f.myown}">내 담당 ${S.claims.filter(c=>c.owner===S.email&&statusOf(c)!=='종결').length}건</button>
-      ${S.me.role?`<button type="button" class="btn ${S.f.mine?'primary':''}" data-act="mine" aria-pressed="${S.f.mine}">내 결재 대기 ${S.claims.filter(needsMe).length}건</button>`:''}
+      <button type="button" class="btn hide-m ${S.f.myown?'primary':''}" data-act="myown" aria-pressed="${S.f.myown}">내 담당 ${S.claims.filter(c=>c.owner===S.email&&statusOf(c)!=='종결').length}건</button>
+      ${S.me.role?`<button type="button" class="btn hide-m ${S.f.mine?'primary':''}" data-act="mine" aria-pressed="${S.f.mine}">내 결재 대기 ${S.claims.filter(needsMe).length}건</button>`:''}
       <span><span class="flabel">처리 상태</span>${segHTML('status',['전체','접수','처리중','종결'],S.f.status)}</span>
-      <span><span class="flabel">처리 단계</span>${segHTML('lv',['전체',...LEVELS.map(l=>l.short)],S.f.lv)}</span>
-      <span><span class="flabel">유형</span><select class="sm" id="f-type"><option>전체</option>${OPT.claimType.map(t=>`<option ${t===S.f.type?'selected':''}>${esc(t)}</option>`).join('')}</select></span>
+      <span class="hide-m"><span class="flabel">처리 단계</span>${segHTML('lv',['전체',...LEVELS.map(l=>l.short)],S.f.lv)}</span>
+      <span class="hide-m"><span class="flabel">유형</span><select class="sm" id="f-type"><option>전체</option>${OPT.claimType.map(t=>`<option ${t===S.f.type?'selected':''}>${esc(t)}</option>`).join('')}</select></span>
       <input class="search" id="f-q" type="search" placeholder="문서번호, 고객명, 주소, 작성자 검색" value="${esc(S.f.q)}">
-      ${S.claims.length?'<button class="btn ghost" data-act="csv">CSV 내보내기</button>':''}
+      ${S.claims.length?'<button class="btn ghost hide-m" data-act="csv">CSV 내보내기</button>':''}
     </div>
     ${body}`;
   app.querySelectorAll('[data-seg]').forEach(b=>b.addEventListener('click',()=>{ S.f[b.dataset.seg]=b.dataset.v; renderList(); }));
   app.querySelector('#f-type').addEventListener('change',e=>{ S.f.type=e.target.value; renderList(); });
   const q = app.querySelector('#f-q');
   q.addEventListener('input',e=>{ S.f.q=e.target.value; clearTimeout(q._t); q._t=setTimeout(()=>{ renderList(); const n=app.querySelector('#f-q'); n.focus(); n.setSelectionRange(n.value.length,n.value.length); },250); });
+  app.querySelectorAll('.mcall').forEach(a=>a.addEventListener('click',e=>e.stopPropagation()));
   app.querySelectorAll('[data-open]').forEach(tr=>{
     tr.addEventListener('click',()=>go('doc',tr.dataset.open));
     tr.addEventListener('keydown',e=>{ if(e.key==='Enter') go('doc',tr.dataset.open); });
   });
   app.querySelector('[data-act="new"]')?.addEventListener('click',()=>go('edit'));
   app.querySelector('[data-act="reset"]')?.addEventListener('click',()=>{ S.f={status:'전체',lv:'전체',type:'전체',q:'',mine:false,myown:false}; renderList(); });
-  app.querySelector('[data-act="myown"]')?.addEventListener('click',()=>{ S.f.myown=!S.f.myown; renderList(); });
-  app.querySelector('[data-act="mine"]')?.addEventListener('click',()=>{ S.f.mine=!S.f.mine; renderList(); });
+  app.querySelectorAll('[data-act="myown"]').forEach(b=>b.addEventListener('click',()=>{ S.f.myown=!S.f.myown; renderList(); }));
+  app.querySelectorAll('[data-act="mine"]').forEach(b=>b.addEventListener('click',()=>{ S.f.mine=!S.f.mine; renderList(); }));
+  app.querySelector('[data-act="m-open"]')?.addEventListener('click',()=>{ S.f.status = S.f.status==='미종결' ? '전체' : '미종결'; renderList(); });
   app.querySelector('[data-act="csv"]')?.addEventListener('click',()=>exportCSV(rows));
 }
 
@@ -451,6 +505,10 @@ async function renderDoc(){
   loadAttUrls((Array.isArray(c.attachments)?c.attachments:[]).map(a=>a.path));
   bindEscalation(c, lv);
   app.querySelector('[data-act="back"]').onclick=()=>go('list');
+  // 휴대폰: 아래 메뉴 위에 붙는 바로 하기 줄 (전화 걸기 · 수정)
+  { const tel = telOf(c.phone);
+    if(tel || canW) app.insertAdjacentHTML('beforeend', `<div class="mact">${tel?`<a class="btn" href="tel:${esc(tel)}">${PHONE_SVG}전화 걸기</a>`:''}${canW?'<button type="button" class="btn primary" data-act="m-edit">보고서 수정</button>':''}</div>`);
+    app.querySelector('[data-act="m-edit"]')?.addEventListener('click',()=>go('edit',c._id)); }
   app.querySelector('[data-act="new-from-ex"]')?.addEventListener('click',()=>go('edit'));
   app.querySelector('[data-act="edit"]')?.addEventListener('click',()=>go('edit',c._id));
   app.querySelector('[data-act="del"]')?.addEventListener('click',()=>{ S.confirmDel=true; renderDoc(); });
@@ -698,6 +756,21 @@ function renderEdit(){
 }
 
 /* ---------- 처리 기준 ---------- */
+/* ---------- 내 정보 (휴대폰 아래 메뉴) — 알림 켜기·로그아웃은 위 머리줄의 버튼을 대신 누른다 ---------- */
+function renderMe(){
+  const push = document.getElementById('btn-push');
+  app.innerHTML = `
+    <h1 class="page">내 정보</h1>
+    <div class="me-card"><b>${esc(S.me.name||S.email||'')}</b><span>${esc([S.me.role, S.me.isAdmin?'관리자':''].filter(Boolean).join(' · ')||'직원')}</span><span>${esc(S.email||'')}</span></div>
+    ${push && !push.hidden ? `<button type="button" class="btn mbig ${push.getAttribute('aria-pressed')==='true'?'':'primary'}" data-act="push">${esc(push.textContent)}</button>` : ''}
+    <button type="button" class="btn mbig" data-act="logout">로그아웃</button>
+    <p class="me-note">새 클레임이 등록되면 휴대폰으로 알림이 옵니다. 내가 등록한 건은 오지 않습니다.<br>아이폰은 홈 화면에 추가한 아이콘으로 열어야 알림을 받을 수 있습니다.<br>합계·CSV 내보내기 같은 전체 기능은 컴퓨터에서 열면 보입니다.</p>`;
+  app.querySelector('[data-act="push"]')?.addEventListener('click',()=>push.click());
+  app.querySelector('[data-act="logout"]').addEventListener('click',()=>document.getElementById('btn-logout').click());
+}
+// 알림 버튼 글자가 바뀌면(켜짐·꺼짐) 내 정보 화면도 다시 그린다
+new MutationObserver(()=>{ if(S.view==='me' && S.session) renderMe(); }).observe(document.getElementById('btn-push'), {childList:true, attributes:true});
+
 function renderStd(){
   app.innerHTML = `
     <h1 class="page">처리 기준</h1>
@@ -776,7 +849,7 @@ const configured = window.supabase && CFG.supabaseUrl && CFG.supabaseAnonKey && 
 const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
 const plain = c => { const o = Object.assign({}, c); delete o._id; delete o.example; return o; };
 
-const api = {
+let api = {
   async loadAll(){
     const {data, error} = await sb.from('claims').select('id,data,example').order('created_at', {ascending:true});
     if(error) throw error;
@@ -919,7 +992,36 @@ async function onSession(session){
 document.getElementById('btn-logout').addEventListener('click', ()=>sb.auth.signOut());
 window.addEventListener('hashchange', ()=>{ const m = /^#doc-(.+)$/.exec(location.hash); if(m && S.loaded && S.all.some(x=>x._id===m[1]) && !(S.view==='doc' && S.id===m[1])) go('doc', m[1]); });
 
-if(!sb){
+/* ---------- 미리보기 (내 컴퓨터에서 #demo 로 열 때만: 가짜 데이터, 저장 안 됨) ---------- */
+const DEMO = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && location.hash==='#demo';
+if(DEMO){
+  document.body.insertAdjacentHTML('afterbegin','<div class="demo-bar">미리보기 — 가짜 데이터입니다. 저장되지 않습니다.</div>');
+  const d = n => { const x = new Date(); x.setDate(x.getDate()-n); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); };
+  S.members = [['me@x','나본부','브랜딩전략본부','본부장(H3)'],['kim@x','김도윤','디자인1팀','팀장(H5)'],['lee@x','이수민','디자인1팀','디자이너'],['park@x','박지후','디자인2팀','디자이너']]
+    .map(([email,name,dept,title])=>({email,name,dept,title,status:'재직',role:roleOfTitle(title)}));
+  let seq = 0; const mk = o => Object.assign({_id:'demo'+(++seq), createdBy:'me@x', author:'나본부', claimType:['현장성_누수'], process:['설비']}, o);
+  S.claims = [
+    mk({docNo:'CLM-2026-007', customer:'이유나', phone:'010-0000-1234', address:'서울특별시 강동구 올림픽로 664, 101동 1204호', receivedAt:d(0), level:'담당자', source:'고객 접수', summary:'욕실 실리콘 들뜸'}),
+    mk({docNo:'CLM-2026-006', customer:'정하늘', phone:'010-0000-2231', address:'서울특별시 마포구 월드컵북로 100, 101동 803호', receivedAt:d(3), level:'팀장', owner:'lee@x', action:['재시공'], approvals:{}}),
+    mk({docNo:'CLM-2026-005', customer:'오민재', phone:'010-0000-7781', address:'경기도 고양시 덕양구 화정로 55, 302동 1501호', receivedAt:d(18), level:'본부장', owner:'me@x', action:['보상'], claimType:['감성형']}),
+    mk({docNo:'CLM-2026-004', customer:'한서윤', phone:'010-0000-4410', address:'서울특별시 서대문구 통일로 87, 1203호', receivedAt:d(5), level:'대표', owner:'kim@x', action:['재시공','보상']}),
+    mk({docNo:'CLM-2026-003', customer:'윤채원', phone:'010-0000-9001', address:'서울특별시 은평구 진관2로 12, 805호', receivedAt:d(1), level:'담당자', owner:'me@x'}),
+    mk({docNo:'CLM-2026-002', customer:'강도현', address:'서울특별시 강서구 공항대로 300, 1102호', receivedAt:d(40), level:'팀장', owner:'park@x', action:['보수'], closed:'종결', finalDate:d(30)})
+  ];
+  S.all = S.claims.slice(); S.examples = [];
+  const save = ()=>render();
+  api = Object.assign({}, api, {
+    async loadAll(){}, async loadCfg(){}, async loadMembers(){},
+    async insert(d0){ const id='demo'+(++seq); S.claims.push(Object.assign({}, d0, {_id:id})); S.all = S.claims.slice(); return id; },
+    async update(id,p){ Object.assign(S.all.find(x=>x._id===id), p); save(); },
+    async remove(id){ S.claims = S.claims.filter(x=>x._id!==id); S.all = S.claims.slice(); }
+  });
+  S.session = {user:{id:'demo', email:'me@x'}}; S.authReady = true; S.email = 'me@x'; S.staff = true; S.loaded = true;
+  S.me = {role:'본부장', isAdmin:true, name:'나본부'};
+  document.getElementById('who-email').textContent = '나본부 · 본부장 · 관리자 (미리보기)';
+  history.replaceState(null,'',location.pathname);
+  render();
+} else if(!sb){
   document.getElementById('nav').hidden = true;
   app.innerHTML = `<div class="empty" style="margin-top:28px"><h3>아직 설정되지 않았습니다</h3><p>config.js에 Supabase 주소와 anon 키를 넣어 주세요. 방법은 README.md에 있습니다.</p></div>`;
 } else {
