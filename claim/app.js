@@ -274,7 +274,7 @@ function renderList(){
   } else if(rows.length===0){
     body = `<div class="empty"><h3>조건에 맞는 클레임이 없습니다</h3><p>필터를 바꾸거나 검색어를 지워 보세요.</p><button class="btn" data-act="reset">필터 초기화</button></div>`;
   } else {
-    body = `<div class="tbl-wrap"><table class="ledger"><thead><tr>
+    body = `<div class="tbl-wrap hide-m"><table class="ledger"><thead><tr>
       <th>문서번호</th><th>고객 / 현장</th><th>접수일</th><th>클레임 유형</th><th>중요도</th><th>처리 방안</th><th class="num">비용 합계(원)</th><th>상태</th><th class="num">경과일</th>
     </tr></thead><tbody>`+rows.map(c=>{
       const lv=levelOf(c), st=statusOf(c), el=elapsed(c);
@@ -447,7 +447,7 @@ async function renderDoc(){
     if(i===0) return `<td><div class="stamp-btn" style="cursor:default"><span class="stamp">작성</span><span class="stamp-date">${esc(c.createdAt||'')}</span></div></td>`;
     if(!steps || i>=steps) return `<td class="off"><span>${steps?'해당 없음':'단계 선택'}</span></td>`;
     const a = apOf(ap, r);
-    const mine = canW && (apKey(S.me.role)===r || S.me.isAdmin);
+    const mine = canW && apKey(S.me.role)===r;   // 관리자도 자기 직급 칸만 (팀장→팀장 칸, 본부장→본부장 칸, 대표·부대표→대표 칸)
     if(a?.date){
       const nm = a.by ? memberName(a.by) : '';
       const inner = `<span class="stamp">${esc(r.slice(0,2))}</span><span class="stamp-date">${esc(a.date.slice(5).replace('-','/'))}${nm?' '+esc(nm):''}</span>`;
@@ -774,11 +774,13 @@ new MutationObserver(()=>{ if(S.view==='me' && S.session) renderMe(); }).observe
 function renderStd(){
   app.innerHTML = `
     <h1 class="page">처리 기준</h1>
+    <p class="guide only-m" style="margin:-6px 0 14px">해결이 안 되면 팀장 → 본부장 → 대표·부대표로 올라가고, 올라갈 때마다 결재자가 한 명씩 늘어납니다.</p>
     <p class="sub">클레임은 담당자가 먼저 대응하고, 해결되지 않으면 팀장 → 본부장 → 대표·부대표 순서로 올라갑니다. 단계가 하나 올라갈 때마다 결재받을 사람이 한 명씩 늘어납니다.</p>
     <section class="form-sec">
       <h2>단계별로 누가 결재하나요</h2>
       <p class="guide">✓ 표시한 사람이 결재합니다. 작성자(팀원)는 결재하지 않습니다. 대표·부대표 칸은 두 분 중 한 분이 결재하면 됩니다.</p>
-      <div style="overflow-x:auto"><table class="std matrix"><thead><tr><th>처리 단계</th><th>언제</th>${ROLES.slice(1).map(r=>`<th class="c">${esc(roleLabel(r))}</th>`).join('')}</tr></thead><tbody>
+      <div class="mstd">${LEVELS.map(l=>`<div class="mstd-row">${lvPill(LV[l.key])}<p>${esc(l.when)}</p><span>결재 <b>${esc(ROLES.slice(1, l.steps).map(roleLabel).join(' → '))}</b></span></div>`).join('')}</div>
+      <div class="hide-m" style="overflow-x:auto"><table class="std matrix"><thead><tr><th>처리 단계</th><th>언제</th>${ROLES.slice(1).map(r=>`<th class="c">${esc(roleLabel(r))}</th>`).join('')}</tr></thead><tbody>
         ${LEVELS.map(l=>`<tr><td>${lvPill(LV[l.key])}</td><td>${esc(l.when)}</td>${ROLES.slice(1).map((r,j)=>`<td class="c">${j+1<l.steps?'<b>✓</b>':'<span class="guide">—</span>'}</td>`).join('')}</tr>`).join('')}
       </tbody></table></div>
     </section>
